@@ -124,13 +124,38 @@ app.listen(8000);
 - `npm run dev` → `nodemon index.js` (auto-restart).
 - Dhyan: `nodemon` `dependencies` me hai, devDependency hona chahiye. `PORT` hardcoded `8000` hai.
 
+### Step 9: MongoDB connection (`config/db.js`) aur startup flow
+Pehle version me 3 problems thi, review ke baad fix kiye:
+
+- **`module.exports` ESM me:** project `"type": "module"` hai, isliye `ReferenceError: module is not defined` aata. Fix: `export default connectToDb`.
+- **`MONGO_URI` import time pe read ho raha tha:** ESM me imports hoist hote hain, to `db.js` pehle evaluate hota aur `index.js` ka `dotenv.config()` baad me, matlab URI `undefined`. Fix: URI function ke andar padho, aur `index.js` me sabse upar `import 'dotenv/config'`.
+- **`connectToDb` kahin call nahi ho raha tha:** server bina DB ke start ho jata.
+
+```js
+// index.js
+import 'dotenv/config';
+try {
+  await connectToDb();          // pehle DB, phir listen
+  app.listen(PORT, ...);
+} catch (err) {
+  console.error('Failed to start server:', err.message);
+  process.exit(1);
+}
+```
+
+- `db.js` sirf error **throw** karta hai, `process.exit` nahi. App start/stop ka decision `index.js` leta hai, isse `db.js` testable rehta hai.
+- `serverSelectionTimeoutMS: 5000`: wrong URI pe default 30s latakne ki jagah 5s me fail.
+- `error` / `disconnected` events pe listeners: DB drop hone pe monitoring me dikhta hai.
+- `SIGINT`/`SIGTERM` pe `mongoose.connection.close()`: graceful shutdown.
+- Missing `MONGO_URI` pe clear error. `PORT` fallback `8000` kiya (pehle `9000` tha).
+
 ---
 
 ## Pending
 - Version bump + publish (`dyninno-virtualui-lib`).
 - `peerDependencies` range chowda karna.
 - Types (`dts`) aur `exports` map.
-- Server: `nodemon` → devDependency, PORT `.env` se, DB connect, CORS/cookie middleware.
+- Server: `nodemon` → devDependency, env validation (`config/env.js`), proper logger (pino), CORS/cookie middleware.
 - `virtualui-client` abhi khali hai.
 
 Component props/usage: [`virtualui-lib/README.md`](./virtualui-lib/README.md)

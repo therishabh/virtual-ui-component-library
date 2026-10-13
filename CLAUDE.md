@@ -16,6 +16,8 @@ Root `README.md` is project ki **learning diary** hai. Isse padhke knowledge mil
 
 ## Working rules
 
+- Code me comments **Hinglish** me likho (simple, crisp). Jahan "kyu" non-obvious ho wahan comment do, har line pe nahi.
+
 - Jab user bole "sirf in files me changes karo", un files ke bahar kuch mat badlo.
 - Outward-facing kaam (npm publish, git push, etc.) tabhi karo jab user explicitly bole.
 - Git commit me trailer lagana hai (hook enforce karta hai): `Co-Authored-By: Claude <noreply@anthropic.com>`.
