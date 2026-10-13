@@ -1,11 +1,11 @@
 # Virtual UI Library Project
 
-React component library (`virtualui-lib`). Ye README learning diary hai: sirf wo cheezein jo kaam ki hain, aur **kyu** aise kiya.
+React component library (`virtualui-lib`) + Express backend (`virtualui-server`). Ye README learning diary hai: **kab kya kiya, kyu kiya, aur kya seekha**, step-by-step (purana upar, naya neeche).
 
 ## Structure
 
 ```
-virtualui-lib/
+virtualui-lib/            # npm package
 ├── src/
 │   ├── components/{Button,Card}/*.jsx
 │   └── index.js          # public API (named exports)
@@ -15,10 +15,13 @@ virtualui-server/         # Express 5 backend (ESM)
 virtualui-client/         # abhi khali
 ```
 
-## Learnings
+---
 
-### Components ka pattern
-- Defaults destructuring me hi set kiye (`variant = "primary"`), `defaultProps` nahi. React 19 me function components ke liye `defaultProps` hata diya gaya hai.
+## Steps
+
+### Step 1: Button aur Card components
+`virtualui-lib/src/components/Button/Button.jsx` aur `Card/Card.jsx` banaye (files pehle empty thi).
+
 ```jsx
 const Button = ({ children = "Button", variant = "primary", size = "md", style = {}, ...rest }) => (
   <button style={{ ...variants[variant], ...sizes[size], ...style }} {...rest}>
@@ -27,9 +30,10 @@ const Button = ({ children = "Button", variant = "primary", size = "md", style =
 );
 ```
 
-- `...rest` native element pe spread hota hai, taaki `aria-*`, `data-*`, `className`, handlers bina props declare kiye kaam karein.
+- Defaults destructuring me set kiye, `defaultProps` nahi. React 19 me function components ke liye `defaultProps` hata diya gaya hai.
+- `...rest` native element pe spread hota hai, taaki `aria-*`, `data-*`, `className`, handlers bina declare kiye kaam karein.
 - `style` last me spread hota hai, taaki consumer variant/size ke styles override kar sake (later key wins).
-- Variants/sizes ko object map (`variants[variant]`) rakha, if/else chain nahi. Naya variant = ek key:
+- Variants/sizes object map me rakhe, if/else chain nahi. Naya variant = ek key:
 
 ```js
 const variants = {
@@ -38,11 +42,12 @@ const variants = {
 };
 ```
 
-- Inline styles ki limitation: `:hover`, `:focus`, media queries nahi chalte. Library ko real theming chahiye to CSS variables ya CSS-in-JS pe jana padega.
+- Limitation: inline styles me `:hover`, `:focus`, media queries nahi chalte. Real theming ke liye CSS variables ya CSS-in-JS lagega.
 
-### Bundling (tsup)
+### Step 2: Library ko build karna (tsup)
+`src/index.js` se `Button`, `Card` export kiye, aur `tsup.config.js` banayi.
+
 ```js
-// tsup.config.js
 export default defineConfig({
   entry: ["src/index.js"],
   format: ["esm", "cjs"],
@@ -52,13 +57,13 @@ export default defineConfig({
 });
 ```
 
-- `format: ["esm", "cjs"]`: ESM (`index.mjs`) modern bundlers ke liye, tree-shaking milti hai. CJS (`index.js`) purane tooling/Node `require` ke liye.
-- `external: ["react"]`: react bundle me aa gaya to consumer ke app me **do React copies** ho jayengi aur hooks me "Invalid hook call" aayega. Isliye `peerDependencies` + `external`, dono zaroori.
-- `src/index.js` me `.jsx` import hote hain; esbuild (tsup ke andar) JSX khud handle karta hai.
+- `format: ["esm", "cjs"]`: ESM (`index.mjs`) modern bundlers ke liye, tree-shaking milti hai. CJS (`index.js`) purane tooling/`require` ke liye.
+- `external: ["react"]`: react bundle me chala gaya to consumer app me **do React copies** ho jayengi aur "Invalid hook call" aayega. Isliye `peerDependencies` + `external`, dono zaroori.
+- `.jsx` ko esbuild (tsup ke andar) khud handle karta hai.
 - Classic JSX transform me `React` import chahiye (`React.createElement`). IDE ka "React unused" warning false alarm hai, import hatana nahi hai.
-- `dts: false`: abhi types nahi ban rahe. TS users ko autocomplete/type safety nahi milegi. Fix: `dts: true` (+ `.d.ts` source ya JS ke liye JSDoc).
+- `dts: false`: types nahi ban rahe, TS users ko autocomplete nahi milega. Fix: `dts: true`.
 
-### package.json ke fields
+### Step 3: package.json ke fields
 ```json
 {
   "main": "dist/index.js",
@@ -68,36 +73,44 @@ export default defineConfig({
 }
 ```
 
-- `main` → CJS, `module` → ESM. Modern Node/bundlers ke liye `exports` map better hai (dono formats ko explicitly map karta hai, deep imports block karta hai). Abhi add nahi kiya:
+- `main` → CJS, `module` → ESM. Better option `exports` map hai (formats explicit, deep imports block). Abhi add nahi kiya:
 
 ```json
-"exports": {
-  ".": { "import": "./dist/index.mjs", "require": "./dist/index.js" }
-}
+"exports": { ".": { "import": "./dist/index.mjs", "require": "./dist/index.js" } }
 ```
 
 - `files: ["dist"]`: tarball me sirf build output jata hai. README aur package.json hamesha include hote hain.
-- `peerDependencies.react: ^19.3.0` bahut tight hai. React 18 users pe install warning aayegi. Wide range: `"react": "^18 || ^19"`.
+- `react: ^19.3.0` bahut tight hai, React 18 users ko warning aayegi. Wide range: `"^18 || ^19"`.
 
-### npm publish gotchas
-- Pehle `npm pack --dry-run` se dekho ki tarball me kya ja raha hai.
-- Version bump + publish:
+### Step 4: npm publish try kiya (fail hua)
+Pehle `npm pack --dry-run` se tarball check kiya (sirf `dist/` + `package.json` + README ja rahe the). Package ka naam `dyninno-virtualui-lib` kiya, phir publish:
+
+```
+npm error You cannot publish over the previously published versions: 1.0.0.
+```
+
+- Ek baar publish hua version dobara publish nahi hota, na overwrite hota hai.
+- Fix: version badhao, phir publish.
 
 ```bash
 npm version patch   # 1.0.0 -> 1.0.1
 npm publish
 ```
 
-- Ek baar publish hua version dobara publish nahi hota, na hi overwrite. Error: `You cannot publish over the previously published versions: 1.0.0`. Fix: `npm version patch` phir publish.
-- Package name `dyninno-virtualui-lib`. Naam change karne pe version history naye naam se alag hoti hai, par agar naam pe 1.0.0 pehle se hai to wahi error aata hai.
+### Step 5: README files
+- `virtualui-lib/README.md`: npm page ke liye (usage + props tables). Ye isliye package folder me hai kyunki npm README isi folder se uthata hai.
+- Root `README.md`: ye diary.
 
-### virtualui-server (Express 5)
-- ESM backend: `"type": "module"` hai, isliye `import express from 'express'` chalta hai, `require` nahi.
-- Express 5 choose kiya: async route handlers me rejected promise/throw automatically error middleware tak jata hai, `try/catch` ya wrapper ki zarurat nahi.
-- Dependencies: `express`, `mongoose`, `jsonwebtoken`, `cookie-parser`, `cors`, `dotenv`. Abhi sirf express use ho raha hai, baaki aage auth/DB ke liye.
-- `nodemon` dependencies me hai, jabki ye devDependency hona chahiye (production install me bekar jayega).
-- Abhi sirf health-check route hai:
+### Step 6: Repo setup
+Root pe `.gitignore` (`node_modules/`, `dist/`, `*.tgz`, `.env*`) aur GitHub repo: https://github.com/therishabh/virtual-ui-component-library (`main`).
 
+- `dist/` ignore hai kyunki build output hai; npm publish `files` field se dist leta hai, git se nahi.
+- Khali folders (`virtualui-client`) git track nahi karta, files aane pe hi dikhenge.
+
+### Step 7: CLAUDE.md
+README ke rules (diary style, chronological steps, no basic steps, "kyu" likhna, code snippets, commit se pehle update) aur working rules (publish/push sirf bolne pe) `CLAUDE.md` me likhe, taaki Claude hamesha follow kare.
+
+### Step 8: virtualui-server (Express 5)
 ```js
 app.get('/', (req, res) => {
   res.status(200).json({ message: "success", status: true });
@@ -105,14 +118,19 @@ app.get('/', (req, res) => {
 app.listen(8000);
 ```
 
-- `npm run dev` → `nodemon index.js` (file change pe auto-restart).
-- `PORT` hardcoded `8000` hai; `dotenv` aane ke baad `process.env.PORT ?? 8000` karna better.
+- ESM backend (`"type": "module"`), isliye `import express from 'express'`, `require` nahi.
+- Express 5: async handlers me rejected promise/throw automatically error middleware tak jata hai, `try/catch` wrapper nahi chahiye.
+- Dependencies: `express`, `mongoose`, `jsonwebtoken`, `cookie-parser`, `cors`, `dotenv`. Abhi sirf express use ho raha hai, baaki auth/DB ke liye.
+- `npm run dev` → `nodemon index.js` (auto-restart).
+- Dhyan: `nodemon` `dependencies` me hai, devDependency hona chahiye. `PORT` hardcoded `8000` hai.
+
+---
 
 ## Pending
-- Version bump + publish.
+- Version bump + publish (`dyninno-virtualui-lib`).
 - `peerDependencies` range chowda karna.
 - Types (`dts`) aur `exports` map.
-- Server: `nodemon` ko devDependency banana, PORT env se, `.env` + DB connect + CORS/cookie middleware.
+- Server: `nodemon` → devDependency, PORT `.env` se, DB connect, CORS/cookie middleware.
 - `virtualui-client` abhi khali hai.
 
 Component props/usage: [`virtualui-lib/README.md`](./virtualui-lib/README.md)

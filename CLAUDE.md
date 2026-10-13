@@ -4,6 +4,7 @@
 
 Root `README.md` is project ki **learning diary** hai. Isse padhke knowledge milni chahiye: kya kiya, **kyu** kiya, aur kaunsi gotchas mili. Ye book jaisi lambi nahi honi chahiye.
 
+- **Structure chronological hona chahiye**: `Step 1, Step 2, ...` timeline ke order me (purana upar, naya neeche). Topic-wise (bundling, package fields, etc.) sections mat banao, warna flow samajh nahi aata ki kab kya kiya. Naya kaam = naya Step append karo; concept us Step ke andar hi likho.
 - User jab bhi koi kaam kare/karwaye (feature, config change, package, fix, error), README me uski entry add/update karo. Puraana content mat hatao, sirf update/append karo.
 - **Jab bhi user commit kare**, usse pehle README update karo: is commit me kya naya hua aur kyu.
 - User fresher nahi hai. **Basic cheezein mat likho**: `git init/add/commit/push`, `npm install`, folder banana, etc. Sirf concepts, design decisions, trade-offs, errors aur unke fix likho.
