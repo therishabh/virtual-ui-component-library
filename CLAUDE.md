@@ -14,6 +14,12 @@ Root `README.md` is project ki **learning diary** hai. Isse padhke knowledge mil
 - Naye packages, config options aur folder structure me badlav ka mention karo.
 - Pending/TODO items README ke `Pending` section me rakho aur kaam hone pe update karo.
 
+## Modern practices rule
+
+- User chahta hai ki code me **modern, current best practices** use ho (jaise ESM, `import 'dotenv/config'`, top-level await, Express 5, `??`). Purane patterns (CommonJS, `module.exports`, `defaultProps`, `dotenv.config()` after imports) avoid karo.
+- Jab bhi koi modern/better approach ho jo user use nahi kar raha, usse **batao** (chhota reason ke saath) aur code me usi hisab se changes karo.
+- Aisa koi bhi badlav README ke relevant Step me "kyu" ke saath likho, aur ye `CLAUDE.md` me bhi yaad rakho.
+
 ## Working rules
 
 - Code me comments **Hinglish** me likho (simple, crisp). Jahan "kyu" non-obvious ho wahan comment do, har line pe nahi.
