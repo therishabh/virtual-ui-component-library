@@ -150,12 +150,75 @@ try {
 - `SIGINT`/`SIGTERM` pe `mongoose.connection.close()`: graceful shutdown.
 - Missing `MONGO_URI` pe clear error. `PORT` fallback `8000` kiya (pehle `9000` tha).
 
+### Step 10: User model (`models/user.model.js`)
+Fields: `name`, `email`, `role` (ADMIN/USER), `aiCredits` (default 150), plus `timestamps`.
+
+**Bug jo mila:** `lowerCase: true` likha tha. Mongoose ka option `lowercase` hai, galat spelling **silently ignore** hoti hai (error nahi aata). Result: `TEST@Mail.com` aur `test@mail.com` alag users ban jate, aur unique index bhi bypass hota.
+
+```js
+email: { type: String, trim: true, lowercase: true, match: [/^\S+@\S+\.\S+$/, 'Invalid email format'] }
+```
+
+Improvements:
+- `ROLES` ko `Object.freeze` constant banaya aur export kiya, taaki middleware/controllers me magic strings (`"ADMIN"`) na likhne padein.
+- `aiCredits` pe `min: 0`: credits negative na ho sakein.
+- Email pe basic format `match` aur `name` pe `maxlength`; validation messages custom.
+- `versionKey: false` rakha: `__v` field nahi chahiye.
+- Unique index `schema.index()` se (email lookup fast + duplicate block). Isse race condition me bhi duplicate nahi banta, sirf app-level check pe depend nahi.
+- Verify kiya: trim/lowercase, invalid email aur negative credits sab sahi kaam kar rahe hain.
+
+### Step 11: JWT helper (`config/token.js`)
+Pehle version me problems:
+
+- **Error swallow ho raha tha:** `catch` me sirf `console.error` hota tha, function `undefined` return karta. Caller `res.cookie('token', undefined)` kar deta aur login "successful" dikhta, par token hota hi nahi. Fix: error **throw** karo, caller/error middleware handle kare.
+- **Unnecessary `async/await`:** `jwt.sign` bina callback ke synchronous hai, `await` ka koi matlab nahi. Ab `generateToken` sync hai.
+- **`JWT_SECRET` missing ho to** `jsonwebtoken` ka confusing error aata. Ab clear `JWT_SECRET is not defined`.
+- **`verifyToken` nahi tha:** add kiya, aur `algorithms: ['HS256']` pin kiya. Verify me algorithm pin na ho to algorithm-confusion type attacks ka risk rehta hai.
+
+```js
+export const generateToken = (userId) =>
+  jwt.sign({ userId }, getSecret(), { algorithm: 'HS256', expiresIn: '7d' });
+
+export const verifyToken = (token) =>
+  jwt.verify(token, getSecret(), { algorithms: ['HS256'] });
+```
+
+- Verify kiya: token ban/verify ho raha hai (7d = 604800s), tampered token pe `JsonWebTokenError`, missing secret pe clear error.
+
+### Step 12: Auth controller (`controllers/auth.controller.js`)
+`googleAuth` (login/signup) aur `logout`. Review me ye problems mili:
+
+- **Security (abhi bhi open):** email/name seedha `req.body` se aa raha hai, koi bhi kisi ka bhi email bhej ke uske account me login ho sakta hai. Fix (pending): client se Google **ID token** lo, server pe `google-auth-library` ke `verifyIdToken` se verify karo, aur email/name token ke payload se lo. Client ke data pe trust nahi.
+- **NoSQL injection:** `findOne({ email })` me email object ho (`{"$ne": null}`) to koi bhi user mil jata hai. Fix: `typeof email === "string"` check, 400 return.
+- **`generateToken` async tha, controller me `await` nahi tha:** cookie me token ki jagah Promise chala jata. Fix: `generateToken` sync kiya (`jwt.sign` sync hi hai).
+- **Race condition:** `findOne` phir `create` me do parallel requests aayein to dono "user nahi hai" dekhte hain, ek create hota hai aur doosra unique index pe `E11000` se fail. Fix: `findOneAndUpdate` upsert abhi use nahi kar rahe (user ka decision), isliye `create` ke error me `code === 11000` pakad ke user ko wapas `findOne` se fetch karte hain.
+
+```js
+let user = await User.findOne({ email: normalizedEmail });
+if (!user) {
+  try {
+    user = await User.create({ name, email: normalizedEmail });
+  } catch (error) {
+    if (error.code !== 11000) throw error;      // sirf duplicate-key ko handle karo
+    user = await User.findOne({ email: normalizedEmail });
+  }
+}
+```
+
+Aur patterns jo follow karne hain:
+- **try/catch hatao:** Express 5 async errors khud error middleware tak bhejta hai. Pehle catch me `error` object seedha response me ja raha tha (internals leak).
+- **Cookie options ek constant me:** `secure` ab `NODE_ENV === "production"` se (pehle hardcoded `false`). `clearCookie` ko set ke same options chahiye warna cookie delete nahi hoti. `sameSite: "lax"` default; alag domain ke frontend pe `"none"` + `secure`.
+- **Sahi status codes:** naya user `201`, existing `200`, bad input `400`. Message bhi sahi (pehle login pe bhi "created" aata tha).
+- Email ko `trim().toLowerCase()` karke hi lookup karo.
+- Verify kiya: validation (400) aur logout cookie options. **DB wala upsert path test nahi hua** (Atlas connection abhi nahi ban raha).
+
 ---
 
 ## Pending
 - Version bump + publish (`dyninno-virtualui-lib`).
 - `peerDependencies` range chowda karna.
 - Types (`dts`) aur `exports` map.
+- Auth: Google ID token verify (`google-auth-library`), central error middleware, routes mount + `express.json()` + `cookie-parser`.
 - Server: `nodemon` → devDependency, env validation (`config/env.js`), proper logger (pino), CORS/cookie middleware.
 - `virtualui-client` abhi khali hai.
 
