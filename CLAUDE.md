@@ -33,6 +33,6 @@ Root `README.md` is project ki **learning diary** hai. Isse padhke knowledge mil
 - Virtual UI component library, React (peer dep), source `virtualui-lib/src`.
 - Package: `virtualui-lib/` (npm name `dyninno-virtualui-lib`), build tool `tsup` (ESM + CJS, `react` external).
 - Components: `Button`, `Card` (`src/components/<Name>/<Name>.jsx`), exported from `src/index.js`.
-- Folders: `virtualui-lib` (package), `virtualui-client`, `virtualui-server` (abhi khali).
+- Folders: `virtualui-lib` (package), `virtualui-client`, `virtualui-server` (Express 5 backend: `app.js` = app factory, `server.js` = entry point).
 - Repo: https://github.com/therishabh/virtual-ui-component-library (branch `main`).
 - `.gitignore` root pe hai (`node_modules`, `dist`, `.env*` ignore).

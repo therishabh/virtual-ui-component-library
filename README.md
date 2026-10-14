@@ -212,13 +212,63 @@ Aur patterns jo follow karne hain:
 - Email ko `trim().toLowerCase()` karke hi lookup karo.
 - Verify kiya: validation (400) aur logout cookie options. **DB wala upsert path test nahi hua** (Atlas connection abhi nahi ban raha).
 
+### Step 13: `app.js` aur `server.js` alag kiye (`index.js` hata diya)
+Pehle `index.js` me app banana, middlewares, DB connect aur listen sab ek jagah tha. Ab:
+
+- **`app.js`** = Express app **factory** (`createApp()`): middlewares + routes, `listen()` nahi, DB nahi.
+- **`server.js`** = entry point: DB connect -> `listen` -> graceful shutdown.
+
+```js
+// app.js
+export const createApp = () => {
+  const app = express();
+  app.use(express.json());
+  app.use(cookieParser());
+  app.use('/api/auth', authRouter);
+  return app;
+};
+```
+
+Kyu alag kiya:
+- **Testing:** `supertest(createApp())` se bina port khole, bina DB ke routes test ho sakte hain. Factory se har test ko fresh app milta hai.
+- **Separation of concerns:** HTTP config alag, process lifecycle (signals, exit codes) alag.
+
+Graceful shutdown (`server.js`) ka order important hai:
+
+```js
+server.close(cb);            // 1. naye connections band, chal rahi requests poori hone do
+server.closeIdleConnections(); // keep-alive idle sockets turant band, warna close() atka rehta hai
+await disconnectDb();        // 2. phir DB close (pehle DB band kiya to in-flight requests fail hongi)
+process.exit(0);
+```
+
+- `SIGINT` (Ctrl+C) aur `SIGTERM` (Docker/k8s/pm2) dono handle. Double signal ignore (`isShuttingDown` flag).
+- 10s ka force-exit timer (`unref()` ke saath, taaki timer khud process ko zinda na rakhe).
+- `unhandledRejection` / `uncaughtException`: log karo, cleanly band karo, **exit code 1** (process ka state in cases me bharosemand nahi).
+- `db.js` se signal handlers hata diye, wo ab sirf `connectToDb` aur `disconnectDb` deta hai. Shutdown ka order `server.js` decide karta hai.
+- `package.json`: `main` = `server.js`, scripts: `dev` (`nodemon server.js`), `start` (`node server.js`).
+- **Bug jo mila:** `routes/auth.route.js` me `import ... from "../controllers/auth.controller"` bina `.js` ke tha. ESM me extension zaroori hai, warna `ERR_MODULE_NOT_FOUND`. Fix: `.js` add kiya.
+- Verify kiya: health `200`, logout `200`, invalid google body `400`, aur real server pe `SIGTERM` bhejne par "Shutdown complete" aur exit code `0`.
+
+### Step 14: Auth routes (`routes/auth.route.js`)
+- **`logout` GET se POST kiya:** state change karne wala endpoint GET nahi hona chahiye. GET se `<img src=".../logout">` jaise tareeke se user ko chupke se logout karaya ja sakta hai (CSRF), aur browser prefetch bhi GET ko khud call kar deta hai.
+
+```js
+authRouter.post('/google', googleAuth);   // POST /api/auth/google
+authRouter.post('/logout', logout);       // POST /api/auth/logout  (pehle GET tha)
+```
+
+- Route file me sirf URL + method ko controller se jodte hain, logic controller me. Mount path (`/api/auth`) `app.js` me hai, route file me nahi.
+- Verify kiya: `POST /logout` `200`, `GET /logout` ab `404`.
+
 ---
 
 ## Pending
 - Version bump + publish (`dyninno-virtualui-lib`).
 - `peerDependencies` range chowda karna.
 - Types (`dts`) aur `exports` map.
-- Auth: Google ID token verify (`google-auth-library`), central error middleware, routes mount + `express.json()` + `cookie-parser`.
+- Auth: Google ID token verify (`google-auth-library`), central error middleware.
+- Auth routes pe rate limiting (`express-rate-limit`), brute-force/abuse se bachne ke liye.
 - Server: `nodemon` → devDependency, env validation (`config/env.js`), proper logger (pino), CORS/cookie middleware.
 - `virtualui-client` abhi khali hai.
 
