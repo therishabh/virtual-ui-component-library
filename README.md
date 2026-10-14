@@ -15,9 +15,9 @@ virtualui-server/         # Express 5 backend (ESM)
 ├── app.js / server.js    # app factory / entry point (listen + graceful shutdown)
 ├── config/               # env.js (validation), db.js, token.js (JWT), google.js
 ├── controllers/          # HTTP layer (patla)
-├── services/             # session.service.js (refresh token lifecycle)
+├── services/             # session, password, emailToken, mail
 ├── middlewares/          # auth, rateLimit, error
-├── models/               # user, session
+├── models/               # user, session, emailToken
 ├── routes/ utils/        # route wiring, ApiError, cookies
 └── .env.example          # saare env variables ki list
 virtualui-client/         # abhi khali
@@ -366,7 +366,7 @@ if (claimed.modifiedCount !== 1) { await revokeFamily(session.family); throw una
 - Verify me `algorithms`, `issuer`, `audience` teeno pinned.
 
 #### 15.7 Rate limiting + env validation + error handling
-- **Rate limit** (`express-rate-limit`): `/google` aur `/refresh` pe 15 min me 30 requests per IP, `429`. Memory store single server ke liye theek; multiple servers me Redis store chahiye. Proxy ke peeche `TRUST_PROXY` set karo, warna sab ek IP dikhenge.
+- **Rate limit** (`express-rate-limit`): `/google` pe 15 min me per IP limit, `429` (Step 16 me limits badli: authLimiter 100, refreshLimiter 300). Memory store single server ke liye theek; multiple servers me Redis store chahiye. Proxy ke peeche `TRUST_PROXY` set karo, warna sab ek IP dikhenge.
 - **Env validation** (`config/env.js`): startup pe saare variables ek saath validate (secret >= 32 chars, dono secrets alag, `GOOGLE_CLIENT_ID` required...). Galat config pe server start hi nahi hota. `process.env` jagah-jagah nahi padhte, sab `env` object se.
 - **Central error handler** (`ApiError` + `error.middleware.js`): `throw new ApiError(401, msg, code)` se ek jaisa JSON response. Unexpected errors pe client ko generic 500, poora error sirf server log me. Bad JSON `400`, badi body `413`, unknown route JSON `404`.
 - Chhote hardening: `x-powered-by` band, `express.json({ limit: '10kb' })`.
@@ -390,13 +390,98 @@ if (claimed.modifiedCount !== 1) { await revokeFamily(session.family); throw una
 - Role change 15 min tak purane role se chal sakta hai.
 - Frontend alag domain pe ho to `sameSite: none` + `secure` + CSRF protection chahiye.
 
+### Step 16: Email + password signup/login (branch: `feat/email-password-auth`)
+User ab Google ke saath **email + password** se bhi signup/login kar sakta hai. Dono ke baad aage ka system same hai (wahi access + refresh tokens). Detail: `docs/AUTH_FLOW.md` (Flow 1b, 1c, 1d).
+
+**Naye endpoints:** `POST /api/auth/signup {name,email,password}` (201, auto-login), `POST /api/auth/login {email,password}`.
+
+**Naye/badle files:** `services/password.service.js` (naya), `models/user.model.js` (`passwordHash`, `emailVerified`), `controllers/auth.controller.js` (`signup`, `login`, Google linking), `middlewares/rateLimit.middleware.js` (`loginLimiter`, `refreshLimiter`), `routes/auth.route.js`. Package: `argon2`.
+
+Kya seekha / kyu aise kiya:
+
+- **Argon2id, SHA nahi:** password hash jaan-boojh ke slow aur memory-hungry hona chahiye. SHA-256/MD5 fast hain, attacker billions guesses/sec karta hai. Salt library khud banati hai aur hash string me rakhti hai.
+
+```js
+const passwordHash = await argon2.hash(password);          // "$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>"
+await argon2.verify(passwordHash, password);
+```
+
+- **`passwordHash` `select: false`:** normal queries me field aati hi nahi, galti se response/log me leak nahi hoti. Login me `.select('+passwordHash')` se mangte hain.
+- **Password length 8 se 128:** min NIST guideline. Max isliye ki bahut lamba password bhejke koi hashing me CPU/memory (DoS) kha sakta hai. Composition rules nahi lagaye (NIST bhi discourage karta hai), aur password trim nahi hota.
+- **Login me user enumeration/timing se bachav:** galat email, galat password aur Google-only account teeno pe **ek jaisa** `401 INVALID_CREDENTIALS`. Email na mile tab bhi dummy hash verify chalta hai, taaki response time se registered emails na pata chalein.
+
+```js
+if (user?.passwordHash) isValid = await verifyPassword(user.passwordHash, password);
+else await verifyAgainstDummy(password);   // timing barabar
+```
+
+- **Brute-force:** `loginLimiter` key = IP + email, 10 fail per 15 min (success count nahi). `authLimiter` (sirf IP) iske saath lagta hai, kyunki sirf IP+email pe attacker alag emails try karke (credential stuffing) bach jata.
+- **Signup ek existing email ko touch nahi karta (409):** warna Google-only account pe signup se password set ho jata aur koi bhi kisi ke Google account me ghus jata.
+- **Pre-hijacking attack ka fix:** attacker victim ka email apne password se signup kar de (email verify nahi hota), baad me victim Google se aaye aur hum account link kar dein, to attacker ka password chalta rahe. Isliye `emailVerified` field: Google se `true`, password signup me `false`. Google link pe unverified account ka **password hata dete hain aur saare sessions revoke**.
+
+```js
+if (!user.emailVerified) { user.set('passwordHash', undefined); await revokeAllUserSessions(user._id); }
+user.googleId = profile.googleId; user.emailVerified = true;
+```
+
+- **Rehash on login:** `needsRehash(hash)` true ho (future me argon2 params badhayein) to login pe naye params se dobara hash.
+- **Rate limits ka fix (bug jo test me mila):** `/refresh` aur `/signup`/`/login`/`/google` ek hi IP-limiter (30) share karte the. Office/NAT ke peeche kai users ek IP se aate hain aur har user har ~15 min me refresh karta hai, to asli users block ho jate. Ab: `authLimiter` 100, `refreshLimiter` 300 (alag), `loginLimiter` 10 per IP+email.
+- **Verify kiya** (temporary DB, 20 tests, purane 11 + naye 9): signup validation, argon2id hash stored, no leaks, duplicate 409 (case-insensitive), Google-only email pe signup reject, login success/identical-401, timing (~65ms vs ~65ms), pre-hijacking neutralize (password gaya + attacker session revoke), brute-force 10 fails -> 429 (success count nahi, doosra email unaffected).
+
+**Abhi nahi hai** (email infra chahiye): email verification, forgot/reset/change password, account lockout/CAPTCHA, common-password check.
+
+### Step 17: Email verification, password reset/change, aur auth ke baaki gaps (branch: `feat/email-verification-and-password-reset`)
+Auth flow me jo cheezein miss thi wo poori kari. Poora detail `virtualui-server/docs/AUTH_FLOW.md` me (ye doc ab poori tarah naye flows ke hisaab se rewrite hai).
+
+**Naye endpoints:** `POST /verify-email`, `/resend-verification`, `/forgot-password`, `/reset-password`, `/change-password`.
+**Behaviour badla:** signup ke baad user login **nahi** hota. Email verify karni padti hai, password login unverified pe `403 EMAIL_NOT_VERIFIED`.
+**Mailer abhi skip:** email ki jagah link server console me print hota hai (`[DEV MAIL]` block). Production me console mail band hai.
+
+**Naye files:** `models/emailToken.model.js`, `services/emailToken.service.js`, `services/mail.service.js`. Badle: controller, routes, `rateLimit.middleware.js`, `error.middleware.js`, `app.js`, `config/env.js`, `session.service.js`.
+
+Kya seekha / kyu aise kiya:
+
+- **Email token = random token + DB record, JWT nahi.** DB me hai to kabhi bhi delete/invalidate kar sakte hain (ek baar use hone pe, ya resend pe). JWT beech me cancel nahi hota. Raw token sirf email me jata hai, DB me SHA-256 hash (token already 256-bit random hai, to argon2 ki zarurat nahi).
+
+```js
+const token = randomBytes(32).toString('base64url');   // email me
+tokenHash = sha256(token);                              // DB me
+```
+
+- **Verify aur reset ka mechanism same:** ek hi `EmailToken` model, `type` field se alag (verify 24h, reset 1h). Galat type ka token consume bhi nahi hota.
+- **Token "ek baar" kaise:** `findOne` phir `deleteOne` aur `deletedCount === 1` check. Do requests ek saath aayein to sirf ek jeetti hai (session rotation wala atomic claim pattern).
+- **Verify POST hai, GET nahi:** email scanners/link previews links khud khol dete hain, GET pe verify hota to user ke click ke bina hi ho jata. Verify ke baad auto-login bhi nahi (link leak ho to bhi koi andar nahi aata).
+- **403 `EMAIL_NOT_VERIFIED` password sahi hone ke baad:** galat password wale ko verification state pata na chale. Google wale error ko alag code (`GOOGLE_EMAIL_NOT_VERIFIED`) diya, taaki frontend ka "resend" button galat jagah na aaye.
+- **Forgot/resend hamesha ek jaisa 200 aur kaam background me:** registered email pe DB write + mail ka extra time lagta hai, wait karte to response time se email enumeration hota. Background me dono cases barabar.
+
+```js
+runInBackground('forgot password', async () => { const user = await User.findOne(...); if (user) await issueResetEmail(user); });
+return res.status(200).json({ ...same body... });
+```
+
+- **Mail best-effort:** mail fail ho to flow nahi tootta, client ko pata nahi chalta (warna existence leak), error sirf server log me.
+- **Console transport production me band:** logs me verify/reset links print hona khatarnak hai (logs padhne wala account hijack kar sakta hai). `setMailTransport(fn)` se asli provider lagana hai, flows ko kuch nahi badalna.
+- **Reset password ka order:** validate + hash pehle, token consume baad me (weak password pe token waste na ho). Phir `emailVerified: true` (link inbox me gaya tha), baaki tokens delete, **saare sessions revoke**.
+- **Change password:** current password maangte hain (chori hue access token se password na badle). Baaki devices ke sessions revoke, is device ke liye naya session. Google-only account ko `NO_PASSWORD_SET`: unhe "forgot password" se pehla password set karna hota hai (set-password re-auth ke bina allow karte to chori hue access token se attacker permanent password laga leta).
+- **Naye rate limiters:** `emailActionLimiter` (IP+email, ghante me 5, email bombing roke), `credentialChangeLimiter` (IP+userId, change-password pe current password guessing roke).
+- **Refresh pe unverified block:** `rotateSession` me `!emailVerified && !googleId` pe family revoke. Google-linked users verified maane jate hain, taaki purane (field se pehle bane) users logout na hon.
+- **CORS add kiya:** `cors({ origin: CLIENT_URL, credentials: true })`. `"*"` cookies ke saath chalta hi nahi aur unsafe hai. `CLIENT_URL` env (dev default `http://localhost:5173`, production me required) email links ke liye bhi use hota hai.
+- **Error handler me 2 mapping:** `CastError` (galat id format) `400`, E11000 (duplicate key) `409`, dono pehle `500` jate the.
+- Google link pe purane email tokens delete (pre-hijacking cleanup ka hissa).
+
+**Dev me kaise chalayein:** signup karo, server terminal me `[DEV MAIL]` block dikhega, usme token copy karke `POST /api/auth/verify-email {token}`. Phir login.
+
+**Verify kiya** (temporary DB, 30 tests: 11 purane + 8 password + 11 naye): signup me cookies nahi, login 403 sirf sahi password pe, verify (invalid/tampered/GET/expired/one-time/type mismatch), resend (naya link purana band, identical 200, rate limit), forgot/reset (weak password pe token bachta hai, saare sessions revoke, token one-time, Google-only user password set kar sakta hai), change-password (doosre devices out, is device in, limiter), unverified refresh block, CORS (allowed/preflight/evil), CastError/E11000, console mail print aur mail fail pe signup 201. Real server pe bhi chalaya: `[DEV MAIL]` block print hua, aur production me console mail error deta hai.
+
+**Abhi nahi hai:** asli mail provider, account lockout/CAPTCHA, active sessions list, common-password check.
+
 ---
 
 ## Pending
 - Version bump + publish (`dyninno-virtualui-lib`).
 - `peerDependencies` range chowda karna, types (`dts`) aur `exports` map.
-- Auth: real Google login end-to-end test (`GOOGLE_CLIENT_ID` bharna hai), rate limiter ke liye Redis store (multi-server), refresh me grace window (multi-tab).
-- Server: `nodemon` ko devDependency banana, proper logger (pino), CORS, helmet, request validation library (zod), automated tests ko repo me add karna (`node --test`).
+- Auth: **asli mail provider** (Resend/SendGrid/SES) `setMailTransport` se lagana (production se pehle zaroori), real Google login end-to-end test (`GOOGLE_CLIENT_ID` bharna hai), rate limiter ke liye Redis store (multi-server), refresh me grace window (multi-tab), account lockout/CAPTCHA, active sessions list, common-password check.
+- Server: `nodemon` ko devDependency banana, proper logger (pino), helmet, request validation library (zod), automated tests ko repo me add karna (`node --test`).
 - `virtualui-client` abhi khali hai.
 
 Component props/usage: [`virtualui-lib/README.md`](./virtualui-lib/README.md)

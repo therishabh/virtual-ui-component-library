@@ -30,6 +30,16 @@ export const errorHandler = (err, req, res, next) => {
         return res.status(400).json({ status: false, message: err.message, code: 'VALIDATION_ERROR' });
     }
 
+    // Mongoose CastError: galat format ki id (jaise /users/abc jahan ObjectId chahiye). Client ki galti hai, 500 nahi
+    if (err.name === 'CastError') {
+        return res.status(400).json({ status: false, message: 'Invalid identifier', code: 'INVALID_ID' });
+    }
+
+    // MongoDB unique index violation (E11000). Jahan controller ne khud handle nahi kiya wahan bhi 500 nahi, 409
+    if (err.code === 11000) {
+        return res.status(409).json({ status: false, message: 'Resource already exists', code: 'DUPLICATE' });
+    }
+
     console.error('Unhandled error:', err);
     return res.status(500).json({ status: false, message: 'Internal server error', code: 'INTERNAL_ERROR' });
 };
