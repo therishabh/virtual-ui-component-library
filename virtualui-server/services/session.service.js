@@ -86,9 +86,11 @@ export const rotateSession = async (refreshToken, meta) => {
         throw unauthorized();
     }
 
-    // User delete ho chuka ho to session bhi bekaar
+    // User delete ho chuka ho to session bhi bekaar. Email verify na hone wala password user bhi bekaar:
+    // login pe unhe session milta hi nahi, par agar kisi ke paas purana session hai to refresh pe band kar do.
+    // (Google-linked user email se verified maane jate hain, chahe emailVerified field purana ho.)
     const user = await User.findById(session.user);
-    if (!user) {
+    if (!user || (!user.emailVerified && !user.googleId)) {
         await revokeFamily(session.family);
         throw unauthorized();
     }

@@ -20,6 +20,19 @@ const userSchema = new Schema({
         required: [true, 'Email is required'],
         match: [/^\S+@\S+\.\S+$/, 'Invalid email format'],
     },
+    // Password ka argon2 hash (plain password kabhi store nahi hota). Google-only users ke paas ye nahi hota.
+    // select: false => normal queries me ye field aata hi nahi, galti se response/log me leak nahi hoga.
+    // Login ke time explicitly mangna padta hai: User.findOne(...).select('+passwordHash')
+    passwordHash: {
+        type: String,
+        select: false,
+    },
+    // Email ka malik hone ka proof mila hai ya nahi. Google verified email deta hai => true.
+    // Password signup me abhi email verify nahi hoti => false (account linking ki security me kaam aata hai).
+    emailVerified: {
+        type: Boolean,
+        default: false,
+    },
     // Google ka stable user id (`sub`). Email badal sakta hai, `sub` nahi, isliye account ko ye pehchaan deta hai
     googleId: {
         type: String,

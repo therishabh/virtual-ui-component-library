@@ -67,12 +67,27 @@ if (JWT_ALGORITHM === 'HS256') {
     }
 }
 
+// Frontend ka base URL: (1) CORS ka allowed origin, (2) email me jane wale links (verify / reset) isi se bante hain.
+// Development me default localhost (Vite). Production me zaroor set karo, warna links galat jagah jayenge.
+const clientUrlRaw = process.env.CLIENT_URL?.trim() || (NODE_ENV === 'production' ? undefined : 'http://localhost:5173');
+let CLIENT_URL;
+if (!clientUrlRaw) {
+    errors.push('CLIENT_URL is required in production');
+} else {
+    try {
+        CLIENT_URL = new URL(clientUrlRaw).origin; // sirf origin (scheme + host + port): trailing slash/path hata deta hai
+    } catch {
+        errors.push('CLIENT_URL must be a valid URL (e.g. https://app.example.com)');
+    }
+}
+
 const env = {
     NODE_ENV,
     isProduction: NODE_ENV === 'production',
     PORT: optionalInt('PORT', 8000),
     MONGO_URI: required('MONGO_URI'),
     GOOGLE_CLIENT_ID: required('GOOGLE_CLIENT_ID'),
+    CLIENT_URL,
     // Access token chhota (15 min): chori ho to damage limited. Refresh lamba (7 din): user baar-baar login na kare.
     ACCESS_TTL_SECONDS: optionalInt('JWT_ACCESS_TTL_SECONDS', 15 * 60),
     REFRESH_TTL_SECONDS: optionalInt('JWT_REFRESH_TTL_SECONDS', 7 * 24 * 60 * 60),
