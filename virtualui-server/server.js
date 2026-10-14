@@ -1,9 +1,10 @@
 // dotenv sabse pehle import hota hai, taaki .env baaki modules se pehle load ho jaye
 import 'dotenv/config';
 import { createApp } from './app.js';
+import env from './config/env.js'; // env validate yahin ho jata hai: galat config pe server start hi nahi hoga
 import connectToDb, { disconnectDb } from './config/db.js';
 
-const PORT = process.env.PORT || 8000;
+const { PORT } = env;
 
 /**
  * Entry point: DB connect -> server listen -> graceful shutdown handlers.

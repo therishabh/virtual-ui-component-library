@@ -1,6 +1,8 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import authRouter from './routes/auth.route.js';
+import env from './config/env.js';
+import { errorHandler, notFoundHandler } from './middlewares/error.middleware.js';
 
 /**
  * Express app factory.
@@ -13,8 +15,15 @@ import authRouter from './routes/auth.route.js';
 export const createApp = () => {
     const app = express();
 
+    // Express ka "X-Powered-By: Express" header band: attacker ko framework batane ki zarurat nahi
+    app.disable('x-powered-by');
+
+    // Reverse proxy (nginx / load balancer) ke peeche ho to req.ip asli client IP se aaye, proxy ki IP se nahi.
+    // Iske bina rate limiting sabko ek IP samajh ke sabko block kar deti hai. Sahi number set karo (galat value spoofing deti hai).
+    if (env.TRUST_PROXY !== undefined) app.set('trust proxy', env.TRUST_PROXY);
+
     // Global middlewares (order matter karta hai: body parser routes se pehle)
-    app.use(express.json());
+    app.use(express.json({ limit: '10kb' })); // body size limit: bade payload se memory abuse na ho
     app.use(cookieParser());
 
     // Health check: load balancer / uptime monitor ke liye
@@ -27,6 +36,10 @@ export const createApp = () => {
 
     // Routes
     app.use('/api/auth', authRouter);
+
+    // Error handling HAMESHA sabse last me: pehle 404 (koi route match nahi hua), phir central error handler
+    app.use(notFoundHandler);
+    app.use(errorHandler);
 
     return app;
 };

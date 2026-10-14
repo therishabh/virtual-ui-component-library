@@ -20,6 +20,10 @@ const userSchema = new Schema({
         required: [true, 'Email is required'],
         match: [/^\S+@\S+\.\S+$/, 'Invalid email format'],
     },
+    // Google ka stable user id (`sub`). Email badal sakta hai, `sub` nahi, isliye account ko ye pehchaan deta hai
+    googleId: {
+        type: String,
+    },
     role: {
         type: String,
         enum: Object.values(ROLES),
@@ -37,6 +41,10 @@ const userSchema = new Schema({
 
 // email pe unique index (duplicate users rokne ke liye, aur email se lookup fast)
 userSchema.index({ email: 1 }, { unique: true });
+
+// googleId unique, par optional: partial index sirf unhi docs ko index karta hai jinme googleId string hai.
+// (Normal unique index me googleId missing wale sab docs "null" maane jate aur duplicate error dete.)
+userSchema.index({ googleId: 1 }, { unique: true, partialFilterExpression: { googleId: { $type: 'string' } } });
 
 const User = model('User', userSchema);
 

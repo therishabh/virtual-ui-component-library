@@ -12,6 +12,14 @@ virtualui-lib/            # npm package
 ├── tsup.config.js
 └── package.json
 virtualui-server/         # Express 5 backend (ESM)
+├── app.js / server.js    # app factory / entry point (listen + graceful shutdown)
+├── config/               # env.js (validation), db.js, token.js (JWT), google.js
+├── controllers/          # HTTP layer (patla)
+├── services/             # session.service.js (refresh token lifecycle)
+├── middlewares/          # auth, rateLimit, error
+├── models/               # user, session
+├── routes/ utils/        # route wiring, ApiError, cookies
+└── .env.example          # saare env variables ki list
 virtualui-client/         # abhi khali
 ```
 
@@ -261,15 +269,134 @@ authRouter.post('/logout', logout);       // POST /api/auth/logout  (pehle GET t
 - Route file me sirf URL + method ko controller se jodte hain, logic controller me. Mount path (`/api/auth`) `app.js` me hai, route file me nahi.
 - Verify kiya: `POST /logout` `200`, `GET /logout` ab `404`.
 
+### Step 15: Access + Refresh token auth (branch: `feat/access-refresh-token-auth`)
+Pehle basic JWT tha: ek 7 din ka token, koi middleware nahi, logout sirf cookie clear, Google login me verification nahi. Isko standard production pattern me badla. Ye 8 sub-steps me hua, har sub-step me "kya, kyu, kahan".
+
+> **Poora detail me samajhne ke liye:** [`virtualui-server/docs/AUTH_FLOW.md`](./virtualui-server/docs/AUTH_FLOW.md). Isme har flow (login, refresh, reuse detection, logout), har file ka role, tokens/cookies/DB, error codes, security decisions aur naya route add karne ka tareeka ek jagah hai.
+
+**Poora flow ek nazar me:**
+
+```
+Login   : POST /google {idToken} -> Google verify -> accessToken (15m) + refreshToken (7d) cookies, refresh ka hash DB me
+Request : cookie accessToken -> requireAuth verify (DB nahi) -> req.auth = { userId, role }
+Expire  : 401 code TOKEN_EXPIRED -> frontend POST /refresh -> naya pair (rotation) -> request retry
+Reuse   : purana refresh token dobara aaya -> poori family revoke -> dobara login
+Logout  : POST /logout (ek device) ya /logout-all (saare devices) -> DB me revoke + cookies clear
+```
+
+**API:**
+
+| Method | Route | Auth | Kaam |
+|---|---|---|---|
+| POST | `/api/auth/google` | public, rate limited | Google ID token se login/signup |
+| POST | `/api/auth/refresh` | refresh cookie, rate limited | naya access + refresh token (rotation) |
+| POST | `/api/auth/logout` | public | is device ka session revoke |
+| POST | `/api/auth/logout-all` | `requireAuth` | saare devices se logout |
+| GET | `/api/auth/me` | `requireAuth` | current user |
+
+#### 15.1 Google ID token verification (`config/google.js`)
+**Problem:** email/name `req.body` se aate the, koi bhi kisi ka bhi email bhej ke uske account me ghus sakta tha.
+**Fix:** client sirf Google ka signed `idToken` bhejta hai. Server `google-auth-library` se signature, expiry, issuer aur **audience** verify karta hai, aur email/name token ke payload se leta hai.
+
+```js
+const ticket = await client.verifyIdToken({ idToken, audience: env.GOOGLE_CLIENT_ID });
+```
+
+- `audience` check zaroori hai, warna kisi doosri app ke liye bana Google token bhi chal jata.
+- `email_verified` false ho to reject: unverified email se account bana/link ho to hijack ho sakta hai.
+- Google ka `sub` (stable id) `User.googleId` me save hota hai (email badal sakta hai, `sub` nahi). Partial unique index: sirf un docs pe jinme googleId hai.
+- Error pe generic `Invalid Google token`, detail nahi (attacker ko hint na mile).
+- Client ke data pe trust nahi, ye rule hamesha.
+
+#### 15.2 `requireAuth` middleware + `/me` (`middlewares/auth.middleware.js`)
+Pehle token bana ke cookie me jata tha, par server uska kahin use nahi karta tha.
+
+```js
+router.get('/me', requireAuth, me);   // requireAuth: cookie -> verifyAccessToken -> req.auth
+```
+
+- Token stateless hai, isliye har request pe DB hit nahi.
+- Status codes: `401` = tum authenticated nahi ho (missing/invalid/expired), `403` = ho, par permission nahi.
+- Expired token ko alag `code: TOKEN_EXPIRED` milta hai. Frontend ise dekh ke `/refresh` call karke request retry karta hai (message text pe depend nahi karta).
+- `/me` DB se fresh user padhta hai (token ka data purana ho sakta hai).
+
+#### 15.3 `requireRole` middleware
+```js
+router.delete('/users/:id', requireAuth, requireRole('ADMIN'), handler);
+```
+- Factory function hai: alag routes pe alag roles. Hamesha `requireAuth` ke **baad**.
+- Role access token me hai, to bina DB ke check hota hai. Trade-off: role badalne pe naya role max 15 min baad lagta hai.
+
+#### 15.4 Access + Refresh token split (`config/token.js`, `utils/cookies.js`)
+| | Access token | Refresh token |
+|---|---|---|
+| Life | 15 min | 7 din |
+| Kaam | har API request | sirf naya access token lena |
+| Secret | `JWT_SECRET` | `JWT_REFRESH_SECRET` (alag) |
+| Cookie path | `/` | `/api/auth` (sirf auth endpoints pe jata hai) |
+
+- Chhota access token: chori ho to damage limited. Lamba refresh token: user baar-baar login na kare.
+- Dono `httpOnly` cookies me (JS se padhe nahi ja sakte, localStorage me XSS se seedha chori hota hai). `secure` production me, `sameSite: lax` (CSRF).
+- Refresh cookie ka path chhota rakha: baaki requests ke saath ye nahi jata, exposure kam.
+- `clearCookie` ko set ke **same options** chahiye (path, sameSite...), warna browser cookie delete nahi karta.
+
+#### 15.5 Rotation + reuse detection + real logout (`models/session.model.js`, `services/session.service.js`)
+Refresh token ka record DB me (`Session`): `jti`, `family`, `tokenHash`, `expiresAt`, `revokedAt`, `replacedBy`, `userAgent`, `ip`.
+
+- **Hash store:** raw token DB me nahi, SHA-256 hash (password jaisa logic). DB leak se token use nahi ho sakta. Compare `timingSafeEqual` se.
+- **Rotation:** har `/refresh` pe purana token revoke + naya issue (same `family`).
+- **Reuse detection:** revoked token dobara aaye = chori ka signal (asli user aur attacker dono use kar rahe). Poori family revoke, dono ko dobara login.
+- **Atomic claim:** do parallel requests same token se aayein to sirf ek jeetti hai:
+
+```js
+const claimed = await Session.updateOne({ _id: session._id, revokedAt: null }, { $set: { revokedAt: new Date() } });
+if (claimed.modifiedCount !== 1) { await revokeFamily(session.family); throw unauthorized(); }
+```
+
+- **Logout:** DB me family revoke + cookies clear (pehle sirf cookie hatti thi, token 7 din valid rehta). Idempotent: hamesha 200.
+- **Logout all:** user ke saare active sessions revoke. Already issue hue access tokens max 15 min chalenge, phir sab band.
+- **TTL index** (`expireAfterSeconds: 0`): expire hote hi MongoDB record khud delete kar deta hai.
+
+#### 15.6 Claims cleanup (`config/token.js`)
+```js
+{ sub: userId, iss: "virtualui-server", aud: "virtualui:access" | "virtualui:refresh", jti, iat, exp, role(access only) }
+```
+- `userId` ki jagah standard `sub`. `iss`, `aud` verify me pin.
+- `aud` alag hone se refresh token ko access token bana ke use nahi kar sakte (token confusion). Test me verify hua.
+- Verify me `algorithms`, `issuer`, `audience` teeno pinned.
+
+#### 15.7 Rate limiting + env validation + error handling
+- **Rate limit** (`express-rate-limit`): `/google` aur `/refresh` pe 15 min me 30 requests per IP, `429`. Memory store single server ke liye theek; multiple servers me Redis store chahiye. Proxy ke peeche `TRUST_PROXY` set karo, warna sab ek IP dikhenge.
+- **Env validation** (`config/env.js`): startup pe saare variables ek saath validate (secret >= 32 chars, dono secrets alag, `GOOGLE_CLIENT_ID` required...). Galat config pe server start hi nahi hota. `process.env` jagah-jagah nahi padhte, sab `env` object se.
+- **Central error handler** (`ApiError` + `error.middleware.js`): `throw new ApiError(401, msg, code)` se ek jaisa JSON response. Unexpected errors pe client ko generic 500, poora error sirf server log me. Bad JSON `400`, badi body `413`, unknown route JSON `404`.
+- Chhote hardening: `x-powered-by` band, `express.json({ limit: '10kb' })`.
+
+#### 15.8 RS256 + key rotation (optional, `JWT_ALGORITHM=RS256`)
+- HS256 me ek hi secret sign aur verify karta hai. RS256 me private key se sign, public key se verify: jab multiple services token verify karein to unhe secret nahi dena padta.
+- Token header me `kid` (key id). Rotation: nayi key `JWT_KEY_ID=k2`, purani public key `JWT_PREVIOUS_PUBLIC_KEYS={"k1": "..."}` me, jab tak purane tokens expire na ho jayein. Phir purani key hata do.
+- Default HS256 hai, RS256 tabhi lo jab zarurat ho.
+
+**Env variables:** `.env.example` dekho. Naye: `JWT_REFRESH_SECRET`, `GOOGLE_CLIENT_ID`, optional `JWT_ACCESS_TTL_SECONDS`, `JWT_REFRESH_TTL_SECONDS`, `TRUST_PROXY`, aur RS256 ke `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` / `JWT_KEY_ID` / `JWT_PREVIOUS_PUBLIC_KEYS`.
+
+**Packages:** `google-auth-library`, `express-rate-limit`.
+
+**Frontend ko ye karna hoga:** Google se `idToken` lekar `POST /api/auth/google {idToken}`; `credentials: 'include'` har request me; `401 TOKEN_EXPIRED` pe ek baar `/api/auth/refresh` call karke request retry; logout `POST`.
+
+**Verify kiya** (temporary DB pe, Google verify stub karke, 11 tests): validation, invalid/unverified Google token, login cookies + hashed session, `/me` (missing/tampered token, refresh token as access), `requireRole` 403, rotation, reuse detection (poori family revoke), parallel refresh (sirf ek jeete), access expiry -> TOKEN_EXPIRED -> refresh, logout (DB se asli revoke), logout-all, error handling, rate limit 429. RS256: sign/verify, rotation (purani key se purana token chala), purani key hatane pe reject, HS256 token ko RS256 server pe reject. **Real Google token se end-to-end test nahi hua** (GOOGLE_CLIENT_ID chahiye).
+
+**Known limitations (jaan-boojh ke):**
+- Frontend me do tabs ek saath same refresh token bhejein to ek ko reuse maan ke family revoke ho sakti hai. Frontend me ek hi refresh request (single-flight) rakho. Aage chahiye to chhota grace window add kar sakte hain.
+- Rate limiter in-memory hai (multi-server pe Redis).
+- Role change 15 min tak purane role se chal sakta hai.
+- Frontend alag domain pe ho to `sameSite: none` + `secure` + CSRF protection chahiye.
+
 ---
 
 ## Pending
 - Version bump + publish (`dyninno-virtualui-lib`).
-- `peerDependencies` range chowda karna.
-- Types (`dts`) aur `exports` map.
-- Auth: Google ID token verify (`google-auth-library`), central error middleware.
-- Auth routes pe rate limiting (`express-rate-limit`), brute-force/abuse se bachne ke liye.
-- Server: `nodemon` → devDependency, env validation (`config/env.js`), proper logger (pino), CORS/cookie middleware.
+- `peerDependencies` range chowda karna, types (`dts`) aur `exports` map.
+- Auth: real Google login end-to-end test (`GOOGLE_CLIENT_ID` bharna hai), rate limiter ke liye Redis store (multi-server), refresh me grace window (multi-tab).
+- Server: `nodemon` ko devDependency banana, proper logger (pino), CORS, helmet, request validation library (zod), automated tests ko repo me add karna (`node --test`).
 - `virtualui-client` abhi khali hai.
 
 Component props/usage: [`virtualui-lib/README.md`](./virtualui-lib/README.md)

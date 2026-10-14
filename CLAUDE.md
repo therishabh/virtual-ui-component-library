@@ -22,6 +22,7 @@ Root `README.md` is project ki **learning diary** hai. Isse padhke knowledge mil
 
 ## Working rules
 
+- Auth ka flow `virtualui-server/docs/AUTH_FLOW.md` me documented hai. Auth se jude changes (tokens, cookies, routes, middlewares, env, models) karo to us doc ko bhi update karo.
 - Code me comments **Hinglish** me likho (simple, crisp). Jahan "kyu" non-obvious ho wahan comment do, har line pe nahi.
 
 - Jab user bole "sirf in files me changes karo", un files ke bahar kuch mat badlo.
@@ -33,6 +34,6 @@ Root `README.md` is project ki **learning diary** hai. Isse padhke knowledge mil
 - Virtual UI component library, React (peer dep), source `virtualui-lib/src`.
 - Package: `virtualui-lib/` (npm name `dyninno-virtualui-lib`), build tool `tsup` (ESM + CJS, `react` external).
 - Components: `Button`, `Card` (`src/components/<Name>/<Name>.jsx`), exported from `src/index.js`.
-- Folders: `virtualui-lib` (package), `virtualui-client`, `virtualui-server` (Express 5 backend: `app.js` = app factory, `server.js` = entry point).
+- Folders: `virtualui-lib` (package), `virtualui-client`, `virtualui-server` (Express 5 backend: `app.js` = app factory, `server.js` = entry point; auth = access+refresh JWT, Google ID token login, sessions in MongoDB; env `config/env.js` me validate hota hai, `process.env` seedha mat padho).
 - Repo: https://github.com/therishabh/virtual-ui-component-library (branch `main`).
 - `.gitignore` root pe hai (`node_modules`, `dist`, `.env*` ignore).
