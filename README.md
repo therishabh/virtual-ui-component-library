@@ -261,6 +261,25 @@ authRouter.post('/logout', logout);       // POST /api/auth/logout  (pehle GET t
 - Route file me sirf URL + method ko controller se jodte hain, logic controller me. Mount path (`/api/auth`) `app.js` me hai, route file me nahi.
 - Verify kiya: `POST /logout` `200`, `GET /logout` ab `404`.
 
+### Step 15: `virtualui-client` (Vite + React 19)
+
+- Vite se scaffold (CRA deprecated; Vite ka dev server/HMR fast). ESM + ESLint flat config.
+- **Tailwind v4**: `npm i tailwindcss @tailwindcss/vite`, phir:
+
+  ```js
+  // vite.config.js
+  import tailwindcss from '@tailwindcss/vite'
+  export default defineConfig({ plugins: [react(), tailwindcss()] })
+  ```
+
+  ```css
+  /* src/index.css */
+  @import 'tailwindcss';
+  ```
+
+  Kyu: v4 me `tailwind.config.js`/PostCSS/`@tailwind` directives nahi chahiye; Vite plugin classes khud scan karta hai.
+- `react-router-dom` v7 + `react-icons`; `main.jsx` me `<App />` ko `<BrowserRouter>` se wrap kiya. Folders: `src/pages/` (`Home.jsx`), `src/components/` (`Auth.jsx`).
+
 ---
 
 ## Pending
@@ -270,6 +289,6 @@ authRouter.post('/logout', logout);       // POST /api/auth/logout  (pehle GET t
 - Auth: Google ID token verify (`google-auth-library`), central error middleware.
 - Auth routes pe rate limiting (`express-rate-limit`), brute-force/abuse se bachne ke liye.
 - Server: `nodemon` → devDependency, env validation (`config/env.js`), proper logger (pino), CORS/cookie middleware.
-- `virtualui-client` abhi khali hai.
+- `virtualui-client`: auth UI banana aur server APIs se connect karna.
 
 Component props/usage: [`virtualui-lib/README.md`](./virtualui-lib/README.md)
