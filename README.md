@@ -498,6 +498,7 @@ return res.status(200).json({ ...same body... });
   ```
 
   Kyu aise: v4 me `tailwind.config.js`, `postcss.config.js` aur `@tailwind base/components/utilities` directives ki zaroorat nahi. Vite plugin build ke time classes scan karta hai (content paths manually dene nahi padte), aur PostCSS pipeline se fast hai. Check: `App.jsx` me `bg-amber-300` laga ke dekha, kaam kiya.
+- **Routing + icons**: `react-router-dom` v7 aur `react-icons` add kiye. `main.jsx` me `<App />` ko `<BrowserRouter>` se wrap kiya (routing context ke liye zaroori). Naye folders: `src/pages/` (route-level, `Home.jsx`) aur `src/components/` (`Auth.jsx`).
 - Abhi UI placeholder hi hai; auth APIs se connect karna aur `dyninno-virtualui-lib` use karna baaki hai.
 
 ---
