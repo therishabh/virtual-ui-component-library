@@ -479,7 +479,25 @@ return res.status(200).json({ ...same body... });
 
 - Client app Vite se bana: React 19, ESM (`"type": "module"`), ESLint flat config (`eslint.config.js`) + `react-hooks` / `react-refresh` plugins.
 - Kyu Vite: CRA deprecated hai, Vite ka dev server (HMR) aur build fast hai.
-- Template cleanup: default assets hata diye, title/favicon badla, Tailwind v4 add kiya (`tailwindcss` + `@tailwindcss/vite` plugin in `vite.config.js`, `@import "tailwindcss"` in `index.css`). Kyu: v4 me `tailwind.config.js`/PostCSS ki zaroorat nahi, Vite plugin se direct kaam karta hai.
+- Template cleanup: default assets/CSS hata diye, title aur favicon badla.
+- **Tailwind CSS v4 setup** (`virtualui-client`):
+
+  ```bash
+  npm i tailwindcss @tailwindcss/vite
+  ```
+
+  ```js
+  // vite.config.js
+  import tailwindcss from '@tailwindcss/vite'
+  export default defineConfig({ plugins: [react(), tailwindcss()] })
+  ```
+
+  ```css
+  /* src/index.css */
+  @import 'tailwindcss';
+  ```
+
+  Kyu aise: v4 me `tailwind.config.js`, `postcss.config.js` aur `@tailwind base/components/utilities` directives ki zaroorat nahi. Vite plugin build ke time classes scan karta hai (content paths manually dene nahi padte), aur PostCSS pipeline se fast hai. Check: `App.jsx` me `bg-amber-300` laga ke dekha, kaam kiya.
 - Abhi UI placeholder hi hai; auth APIs se connect karna aur `dyninno-virtualui-lib` use karna baaki hai.
 
 ---
