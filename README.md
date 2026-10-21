@@ -20,7 +20,7 @@ virtualui-server/         # Express 5 backend (ESM)
 ├── models/               # user, session, emailToken
 ├── routes/ utils/        # route wiring, ApiError, cookies
 └── .env.example          # saare env variables ki list
-virtualui-client/         # abhi khali
+virtualui-client/         # Vite + React 19 scaffold (ESM, ESLint flat config)
 ```
 
 ---
@@ -475,6 +475,12 @@ return res.status(200).json({ ...same body... });
 
 **Abhi nahi hai:** asli mail provider, account lockout/CAPTCHA, active sessions list, common-password check.
 
+### Step 18: `virtualui-client` scaffold (Vite + React)
+
+- Client app Vite se bana: React 19, ESM (`"type": "module"`), ESLint flat config (`eslint.config.js`) + `react-hooks` / `react-refresh` plugins.
+- Kyu Vite: CRA deprecated hai, Vite ka dev server (HMR) aur build fast hai.
+- Abhi default template hi hai; auth APIs se connect karna aur `dyninno-virtualui-lib` use karna baaki hai.
+
 ---
 
 ## Pending
@@ -482,6 +488,6 @@ return res.status(200).json({ ...same body... });
 - `peerDependencies` range chowda karna, types (`dts`) aur `exports` map.
 - Auth: **asli mail provider** (Resend/SendGrid/SES) `setMailTransport` se lagana (production se pehle zaroori), real Google login end-to-end test (`GOOGLE_CLIENT_ID` bharna hai), rate limiter ke liye Redis store (multi-server), refresh me grace window (multi-tab), account lockout/CAPTCHA, active sessions list, common-password check.
 - Server: `nodemon` ko devDependency banana, proper logger (pino), helmet, request validation library (zod), automated tests ko repo me add karna (`node --test`).
-- `virtualui-client` abhi khali hai.
+- `virtualui-client`: default template hata ke login/signup UI banana, server auth APIs se connect karna.
 
 Component props/usage: [`virtualui-lib/README.md`](./virtualui-lib/README.md)
