@@ -479,7 +479,8 @@ return res.status(200).json({ ...same body... });
 
 - Client app Vite se bana: React 19, ESM (`"type": "module"`), ESLint flat config (`eslint.config.js`) + `react-hooks` / `react-refresh` plugins.
 - Kyu Vite: CRA deprecated hai, Vite ka dev server (HMR) aur build fast hai.
-- Abhi default template hi hai; auth APIs se connect karna aur `dyninno-virtualui-lib` use karna baaki hai.
+- Template cleanup: default assets hata diye, title/favicon badla, Tailwind v4 add kiya (`tailwindcss` + `@tailwindcss/vite` plugin in `vite.config.js`, `@import "tailwindcss"` in `index.css`). Kyu: v4 me `tailwind.config.js`/PostCSS ki zaroorat nahi, Vite plugin se direct kaam karta hai.
+- Abhi UI placeholder hi hai; auth APIs se connect karna aur `dyninno-virtualui-lib` use karna baaki hai.
 
 ---
 
