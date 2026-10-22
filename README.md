@@ -280,6 +280,56 @@ authRouter.post('/logout', logout);       // POST /api/auth/logout  (pehle GET t
   Kyu: v4 me `tailwind.config.js`/PostCSS/`@tailwind` directives nahi chahiye; Vite plugin classes khud scan karta hai.
 - `react-router-dom` v7 + `react-icons`; `main.jsx` me `<App />` ko `<BrowserRouter>` se wrap kiya. Folders: `src/pages/` (`Home.jsx`), `src/components/` (`Auth.jsx`).
 
+### Step 16: Frontend port fix (Vite)
+
+```js
+// vite.config.js
+server: { port: 5173, strictPort: true },
+preview: { port: 4173, strictPort: true },
+```
+
+- Kyu `strictPort`: default me port busy ho to Vite chupchaap `5174` pe chala jata hai. Backend CORS origin aur Firebase authorized domains `5173` ke hisaab se set hote hain, to wo silently toot jaate. `strictPort` se seedha error aata hai.
+
+### Step 17: CORS fix (`app.js`)
+
+```js
+app.use(cors({ origin: process.env.CLIENT_URL ?? 'http://localhost:5173', credentials: true }));
+```
+
+- **Bug tha**: `origin: ""`. Empty string falsy hai, `cors` usse `"*"` maan leta hai, aur `*` + `credentials: true` ko browser reject kar deta hai. Cookie wala login kabhi kaam nahi karta.
+- Fix: explicit frontend origin, env (`CLIENT_URL`) se, taaki prod me alag URL ho sake.
+- `cors()` sabse upar rakha, taaki preflight `OPTIONS` routes se pehle handle ho.
+- Cookie flow ke liye client pe `withCredentials: true` bhi chahiye (axios me already hai).
+
+### Step 18: Google login 400 error fix (`Auth.jsx`)
+
+- **Error**: `AxiosError: Request failed with status code 400`. Server ka validation fail ho raha tha (`name`/`email` string nahi the).
+- **Root cause**: `const {email, name} = response.user`. Firebase user object me `name` field hota hi nahi, field ka naam `displayName` hai. To `name` hamesha `undefined` jata tha.
+- **Fix**:
+
+  ```js
+  const {email, displayName} = response.user;
+  const name = displayName ?? email?.split('@')[0]; // displayName kuch accounts me null hota hai
+  ```
+
+- **Debugging tip**: axios ka message ("status code 400") useless hota hai. Server ka asli message `error.response?.data` me hota hai, isliye catch me wahi print kiya.
+- Verify: login chal gaya, cookie set hui (CORS + `withCredentials` ka Step 17 wala setup kaam aaya).
+
+### Step 19: Axios instance (`src/utils/api.js`)
+
+```js
+export const api = axios.create({
+    baseURL: import.meta.env.VITE_SERVER_URL,
+    withCredentials: true,
+    timeout: 10_000,
+});
+```
+
+- Kyu: `baseURL` aur `withCredentials` har call me repeat karne se koi call me `withCredentials` bhool jao to cookie silently nahi jayegi. Instance me ek baar set, ab `api.post('/api/auth/google', body)`.
+- `timeout` default me 0 (infinite) hota hai, server hang ho to UI latka rehta hai. Isliye 10s set kiya.
+- `getErrorMessage(error)`: `axios.isAxiosError` se check karke `error.response.data.message` nikalta hai (Step 18 wala gotcha ek helper me).
+- Auth.jsx se `axios` import aur `SERVER_URL` const hata diya.
+
 ---
 
 ## Pending
