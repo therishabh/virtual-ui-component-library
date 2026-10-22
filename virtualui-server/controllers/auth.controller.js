@@ -1,4 +1,5 @@
 import { generateToken } from "../config/token.js";
+import { env } from "../config/env.js";
 import User from "../models/user.model.js";
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -7,7 +8,7 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 // (maxAge ko chhodke), warna browser cookie delete nahi karta.
 const cookieOptions = {
     httpOnly: true,                                   // JS se cookie padhi nahi ja sakti (XSS se token chori hone ka risk kam)
-    secure: process.env.NODE_ENV === "production",    // production me sirf HTTPS pe bheji jaye. Hardcode false mat rakho
+    secure: env.isProduction,    // production me sirf HTTPS pe bheji jaye. Hardcode false mat rakho
     sameSite: "lax",                                  // CSRF se bachav. Frontend alag domain pe ho to "none" + secure chahiye
 };
 
@@ -73,7 +74,7 @@ export const googleAuth = async (req, res) => {
  * JWT stateless hai, server pe session nahi hota, isliye logout = cookie clear karna.
  * (Token ko turant invalidate karna ho to blacklist ya short-lived token + refresh token chahiye.)
  */
-export const logout = (req, res) => {
+export const logout = (_req, res) => {
     // clearCookie sync hai, await/try-catch ki zarurat nahi
     res.clearCookie("token", cookieOptions);
 

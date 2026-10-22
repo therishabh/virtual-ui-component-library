@@ -1,9 +1,9 @@
-// dotenv sabse pehle import hota hai, taaki .env baaki modules se pehle load ho jaye
-import 'dotenv/config';
+// env.js andar se dotenv load karta hai aur required vars validate karta hai
+import { env } from './config/env.js';
 import { createApp } from './app.js';
 import connectToDb, { disconnectDb } from './config/db.js';
 
-const PORT = process.env.PORT || 8000;
+const PORT = env.PORT;
 
 /**
  * Entry point: DB connect -> server listen -> graceful shutdown handlers.

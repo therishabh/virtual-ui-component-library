@@ -330,6 +330,29 @@ export const api = axios.create({
 - `getErrorMessage(error)`: `axios.isAxiosError` se check karke `error.response.data.message` nikalta hai (Step 18 wala gotcha ek helper me).
 - Auth.jsx se `axios` import aur `SERVER_URL` const hata diya.
 
+### Step 20: Central env config (`virtualui-server/config/env.js`)
+
+```js
+import 'dotenv/config';
+const REQUIRED = ['MONGO_URI', 'JWT_SECRET'];
+const missing = REQUIRED.filter((key) => !process.env[key]?.trim());
+if (missing.length) throw new Error(`Missing required env variables: ${missing.join(', ')}`);
+
+export const env = Object.freeze({
+    isProduction: process.env.NODE_ENV === 'production',
+    PORT: Number(process.env.PORT) || 8000,
+    CLIENT_URL: process.env.CLIENT_URL ?? 'http://localhost:5173',
+    MONGO_URI: process.env.MONGO_URI,
+    JWT_SECRET: process.env.JWT_SECRET,
+});
+```
+
+- Kyu: `process.env` har file me bikhra tha (db, token, app, server, controller). Typo pe silently `undefined`, defaults alag-alag jagah. Ab sirf `env.js` me `process.env` hai, baaki sab `import { env }`.
+- **Fail fast**: required vars missing ho to startup pe ek hi error me saare naam aate hain. Pehle `undefined` request ke beech crash karta tha.
+- **`dotenv` ab `env.js` ke andar**: ESM imports hoist hote hain, to "server.js me dotenv sabse upar rakho" wala order fragile tha. Ab jo bhi `env` import kare, `.env` pehle load ho chuka hota hai. Isse `db.js`/`token.js` ka "function ke andar read karo" workaround bhi hat gaya (`getSecret()` delete).
+- `PORT` ko `Number()` me convert kiya (env hamesha string hota hai), `Object.freeze` se runtime me value badalne se bachav.
+- Abhi `JWT_REFRESH_SECRET` aur `GOOGLE_CLIENT_ID` `.env` me hain par code me use nahi hote, isliye `env.js` me nahi daale. Use shuru karo to `env` me add karna aur `REQUIRED` me daalna.
+
 ---
 
 ## Pending
