@@ -365,3 +365,31 @@ export const env = Object.freeze({
 - `virtualui-client`: auth UI banana aur server APIs se connect karna.
 
 Component props/usage: [`virtualui-lib/README.md`](./virtualui-lib/README.md)
+
+---
+
+## Reference: explored but reverted
+
+### Firebase ID token verify + `firebaseUid` (security fix)
+
+> **Status: revert kiya (code me nahi hai).** Ye approach implement ki thi (live login pe test nahi hui), phir hata di. Sirf seekhne ke liye yahan rakha hai, jab dobara chahiye ho to isse reuse karo.
+**Problem**: client `{name, email}` body me bhejta tha, server trust karta tha. Koi bhi kisi ka email bhej ke uska account use kar sakta tha. Email identifier ke liye bhi kamzor hai (badal/recycle ho sakta hai).
+
+**Flow ab**:
+
+```js
+// client
+const idToken = await response.user.getIdToken();
+await api.post('/api/auth/google', { idToken });
+
+// server (config/firebase.js)
+const app = initializeApp({ projectId: env.FIREBASE_PROJECT_ID });
+export const verifyIdToken = (idToken) => getAuth(app).verifyIdToken(idToken);
+```
+
+- Server `uid`, `email`, `email_verified`, `name` **verified token ke payload** se leta hai, body se nahi.
+- **Service account key nahi chahiye**: `verifyIdToken` Google ke public certs se signature check karta hai, sirf `projectId` kaafi hai (key sirf admin kaam ke liye). `audience` check se kisi aur project ka token reject hota hai. `FIREBASE_PROJECT_ID` ko `env.js` me required kiya.
+- **Model**: `firebaseUid` (stable ID), unique + **sparse** index. Sparse kyu: purane users me field hi nahi hai, sparse ke bina sab `null` ban ke unique constraint tod dete.
+- **Lookup**: pehle `firebaseUid` se. Nahi mila to purane user ko email se dhundh ke `uid` link karte hain (`findOneAndUpdate` + `$exists: false`). Ye tabhi safe hai jab email verified token se aaya ho, isliye `email_verified` check kiya.
+- **Status codes**: invalid/expired token `401`, unverified email `403`, email kisi aur uid se linked `409`. Sirf `auth/...` errors ko 401 banate hain; certs fetch fail jaisi asli server errors upar jaate hain.
+- **Gotcha**: ID token ~1 ghante me expire hota hai, isliye har login pe naya `getIdToken()` lo. Session ke liye apna JWT cookie hai.
