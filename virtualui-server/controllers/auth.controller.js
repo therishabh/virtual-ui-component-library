@@ -68,6 +68,13 @@ export const googleAuth = async (req, res) => {
     });
 };
 
+export const meAuthController = (req, res) => {
+    return res.status(200).json({
+        status : true, 
+        message : "Success"
+    })
+}
+
 /**
  * POST /auth/logout
  *

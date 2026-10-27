@@ -353,6 +353,30 @@ export const env = Object.freeze({
 - `PORT` ko `Number()` me convert kiya (env hamesha string hota hai), `Object.freeze` se runtime me value badalne se bachav.
 - Abhi `JWT_REFRESH_SECRET` aur `GOOGLE_CLIENT_ID` `.env` me hain par code me use nahi hote, isliye `env.js` me nahi daale. Use shuru karo to `env` me add karna aur `REQUIRED` me daalna.
 
+### Step 21: Auth middleware (`middlewares/auth.middleware.js`) + `GET /api/auth/me`
+
+```js
+const isAuth = (req, res, next) => {
+    try {
+        const { token } = req.cookies;
+        if (!token) return res.status(401).json({ status: false, message: "User should be logged in" });
+        req.userId = verifyToken(token).userId;
+        next();
+    } catch {
+        return res.status(401).json({ status: false, message: "Invalid or expired token" });
+    }
+};
+```
+
+Pehle version me ye bugs the (gotchas):
+- **Empty `catch`**: `jwt.verify` invalid/expired token pe throw karta hai. Catch khaali tha to na response jata tha, na `next()`. Request **hang**, frontend ko 401 hi nahi milta. Ab catch 401 bhejta hai.
+- **`return` missing**: token na ho to `res.json()` ke baad function chalta rehta tha, `verifyToken(undefined)` throw karta. Response bhejte waqt hamesha `return` lagao.
+- **400 vs 401**: login nahi / token galat = 401 (auth fail), 400 bad request hota hai.
+- **Import me `.js` extension**: ESM me bina extension `ERR_MODULE_NOT_FOUND`.
+- **File name casing**: file `auth.middleware.js` thi par import `Auth.middleware.js`. macOS case-insensitive hai to chal jata, Linux (Docker/CI) pe fail. Project convention lowercase hai, to wahi rakha.
+- **Extension bhoolne se permanent bachav**: Node ESM me `.js` hatana possible nahi. `.vscode/settings.json` me `importModuleSpecifierEnding: "js"` set kiya, to VS Code auto-import khud `.js` lagata hai (manual typing pe kaam nahi karta). Next level: `package.json` `imports` (`#config/*`) ya ESLint `import/extensions`.
+- `req.userId` set kiya taaki aage controllers token dubara decode na karein. `console.log` of payload hata diya (token data logs me nahi jana chahiye). `async` hataya, `verifyToken` sync hai.
+
 ---
 
 ## Pending
