@@ -68,10 +68,16 @@ export const googleAuth = async (req, res) => {
     });
 };
 
-export const meAuthController = (req, res) => {
+export const meAuthController = async(req, res) => {
+    const {userId} = req
+    const userInfo = await User.findById(userId);
+    console.log('userInfo', userInfo);
     return res.status(200).json({
+        name : userInfo.name,
+        email : userInfo.email,
+        aiCredits: userInfo.aiCredits,
         status : true, 
-        message : "Success"
+        message : "success"
     })
 }
 

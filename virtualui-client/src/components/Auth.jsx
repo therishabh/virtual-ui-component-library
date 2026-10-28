@@ -5,7 +5,9 @@ import {FiCopy, FiDownload, FiLogIn, FiSettings} from 'react-icons/fi'
 import {FcGoogle} from 'react-icons/fc'
 import {signInWithPopup} from 'firebase/auth'
 import {auth, provider} from '../utils/firebase'
+import {useDispatch} from 'react-redux'
 import {api, getErrorMessage} from '../utils/api'
+import {setUserData} from '../redux/userSlice'
 
 // "How it works" ke steps; active step highlight hota hai aur uska description dikhta hai
 const STEPS = [
@@ -33,6 +35,7 @@ const VMark = ({className = 'w-5 h-5'}) => (
 const STEP_INTERVAL = 1000;
 
 const Auth = ({onClose}) => {
+  const dispatch = useDispatch()
   const [active, setActive] = useState(0)
   const [paused, setPaused] = useState(false)
 
@@ -53,7 +56,9 @@ const Auth = ({onClose}) => {
 
         const {data} = await api.post('/api/auth/google', {name, email});
 
-        console.log('result', data);
+        // Server user ko data.data me bhejta hai; Redux me daalne se refresh ke bina Navbar update hota hai
+        dispatch(setUserData(data.data));
+        onClose();
     }catch (error) {
         console.error("Error during Google sign-in:", getErrorMessage(error));
     }

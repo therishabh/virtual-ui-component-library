@@ -379,6 +379,31 @@ Pehle version me ye bugs the (gotchas):
 
 ---
 
+### Step 22: Redux Toolkit setup (user state)
+- Packages: `@reduxjs/toolkit`, `react-redux`.
+- Kyu Redux: logged-in user ka data Navbar, Home aur future pages (My Components, credits) sab me chahiye. Props drilling ya har jagah `/me` call karne se better ek global store.
+- Files:
+  - `src/redux/userSlice.js`: `createSlice` with `userData: null` aur `setUserData` reducer. `null` = logged out.
+  - `src/redux/store.js`: `configureStore({ reducer: { user: userReducer } })`. Naya slice = ek line aur.
+  - `main.jsx`: `<Provider store={store}>` se app wrap kiya.
+- Server: `GET /api/auth/me` ab `User.findById(userId)` karke `name`, `email`, `aiCredits` bhi return karta hai (pehle sirf `status/message`), kyunki Navbar ko user info chahiye.
+- Flow: app load pe `App.jsx` ka `useEffect` `GET /api/auth/me` (Step 21) call karke `setUserData` dispatch karta hai. Cookie valid ho to user mil jata hai, warna 401 aur `userData` `null` hi rehta hai. Isse page refresh pe bhi login bana rehta hai.
+- Components `useSelector(selectUserData)` se padhte hain; logout pe `setUserData(null)`.
+- Login ke baad (`Auth.jsx`) Google API ke response se `dispatch(setUserData(data.data))` + `onClose()`, taaki refresh ke bina Navbar update ho. Note: `/google` user ko `data.data` me deta hai jabki `/me` flat object (`name`, `email`, `aiCredits`) deta hai.
+- Modern practice: RTK me `createSlice` Immer use karta hai, isliye reducer me `state.userData = action.payload` (direct mutation jaisa) likhna safe hai. Purane `switch` reducers / action types ki zarurat nahi.
+- Gotcha (`authChecked`): `userData: null` ka matlab "logged out" bhi tha aur "`/me` abhi aaya nahi" bhi, to refresh pe Login button flash hota tha. Slice me `authChecked: false` add kiya; `setUserData` (success ya `null` on 401, dono me) isse `true` karta hai. Navbar `authChecked` tak skeleton dikhata hai. Protected routes me bhi yahi flag chahiye hoga, warna logged-in user galti se redirect ho jayega.
+- Cleanups: default export reducer hai, isliye `store.js` me naam `userReducer` rakha (`userSlice` misleading tha). Selectors (`selectUserData`, `selectAuthChecked`) slice file se export kiye, taaki `state.user` ka shape sirf ek jagah rahe.
+- 401 interceptor (`utils/api.js`): kisi bhi API se 401 aaye aur user logged in ho to `setUserData(null)` dispatch hota hai, yani cookie expire hone pe UI khud logged out ho jata hai. Check `userData` pe isliye ki logged-out state me baar-baar dispatch na ho. `api.js` ab `store` import karta hai; `store` `api` ko import nahi karta, to circular import nahi banta.
+
+### Step 23: Home page UI (`pages/Home.jsx`)
+- Design ke hisaab se: navbar (logo, Components link, user avatar ya Login), hero (badge, heading, install command + copy, 2 CTA) aur code preview window.
+- Navbar me `userData` (Redux) se decide hota hai: logged in ho to avatar + first name, warna Login button jo `Auth` modal kholta hai.
+- Copy button `navigator.clipboard.writeText` use karta hai, `try/catch` ke saath (permission deny ho sakti hai); 1.5s tak check icon dikhta hai.
+- Tailwind v4 me arbitrary values ki jagah canonical utilities (`bg-linear-to-br`, `h-130`) use kiye, kyunki v4 spacing scale numbers accept karta hai.
+- Navbar avatar pe click => animated dropdown (`AnimatePresence` se exit animation bhi chalti hai, sirf conditional render me unmount pe animation nahi hoti). Menu ke bahar click / `Escape` pe band hota hai (`useEffect` me listeners + cleanup).
+- Logout: `POST /api/auth/logout` (GET nahi, CSRF ki wajah se, Step 21 ke baad wali route) phir Redux `userData` ko `null` kiya.
+- "Everything you need" section: 6 feature cards ek `FEATURES` array se `map` hote hain (JSX repeat nahi). Animation `whileInView` + `viewport={{ once: true }}` se, taaki scroll karke aane pe hi chale aur baar-baar replay na ho.
+
 ## Pending
 - Version bump + publish (`dyninno-virtualui-lib`).
 - `peerDependencies` range chowda karna.
