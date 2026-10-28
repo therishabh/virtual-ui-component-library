@@ -1,8 +1,6 @@
-import { generateToken } from "../config/token.js";
 import { env } from "../config/env.js";
 import User from "../models/user.model.js";
-
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+import { createSession, deleteSession, SESSION_TTL_MS } from "../services/session.service.js";
 
 // Cookie options ek jagah define karo. clearCookie ko set karte time ke same options chahiye
 // (maxAge ko chhodke), warna browser cookie delete nahi karta.
@@ -56,9 +54,12 @@ export const googleAuth = async (req, res) => {
         }
     }
 
-    // 4) Token generate karo (sync function hai, await nahi chahiye). Payload me sirf id.
-    const token = generateToken(user._id);
-    res.cookie("token", token, { ...cookieOptions, maxAge: SEVEN_DAYS_MS });
+    // 4) Pehle purana session (agar cookie me hai) hata do, phir naya banao.
+    // Kyu: har login pe fresh token milta hai (session fixation se bachav) aur purani rows DB me jama nahi hoti.
+    await deleteSession(req.cookies.token);
+    const token = await createSession(user._id, req);
+    // maxAge session ki expiry ke barabar, taaki cookie aur DB row ek saath expire hon
+    res.cookie("token", token, { ...cookieOptions, maxAge: SESSION_TTL_MS });
 
     // 5) Naya user = 201 Created, existing = 200 OK. Message bhi usi hisab se.
     return res.status(isNewUser ? 201 : 200).json({
@@ -71,7 +72,13 @@ export const googleAuth = async (req, res) => {
 export const meAuthController = async(req, res) => {
     const {userId} = req
     const userInfo = await User.findById(userId);
-    console.log('userInfo', userInfo);
+
+    // Session valid hai par user DB se delete ho chuka ho to null aayega; bina check ke niche crash hota.
+    // (userInfo ko console.log nahi karte: har request pe user ka data logs me leak hota tha)
+    if (!userInfo) {
+        return res.status(401).json({ status: false, message: "User should be logged in" });
+    }
+
     return res.status(200).json({
         name : userInfo.name,
         email : userInfo.email,
@@ -84,11 +91,15 @@ export const meAuthController = async(req, res) => {
 /**
  * POST /auth/logout
  *
- * JWT stateless hai, server pe session nahi hota, isliye logout = cookie clear karna.
- * (Token ko turant invalidate karna ho to blacklist ya short-lived token + refresh token chahiye.)
+ * Pehle: JWT stateless tha, to logout = sirf cookie clear, token 7 din tak valid rehta tha.
+ * Ab: DB se session delete karte hain, isliye cookie kisi ne copy kar rakhi ho tab bhi wo token dead ho jata hai.
+ *
+ * isAuth is route pe nahi lagaya: session expire ho chuki ho tab bhi logout 200 de aur cookie clear kare (idempotent).
  */
-export const logout = (_req, res) => {
-    // clearCookie sync hai, await/try-catch ki zarurat nahi
+export const logout = async (req, res) => {
+    await deleteSession(req.cookies.token);
+
+    // clearCookie sync hai; options same chahiye (upar cookieOptions ka comment dekho)
     res.clearCookie("token", cookieOptions);
 
     return res.status(200).json({

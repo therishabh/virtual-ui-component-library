@@ -394,6 +394,7 @@ Pehle version me ye bugs the (gotchas):
 - Gotcha (`authChecked`): `userData: null` ka matlab "logged out" bhi tha aur "`/me` abhi aaya nahi" bhi, to refresh pe Login button flash hota tha. Slice me `authChecked: false` add kiya; `setUserData` (success ya `null` on 401, dono me) isse `true` karta hai. Navbar `authChecked` tak skeleton dikhata hai. Protected routes me bhi yahi flag chahiye hoga, warna logged-in user galti se redirect ho jayega.
 - Cleanups: default export reducer hai, isliye `store.js` me naam `userReducer` rakha (`userSlice` misleading tha). Selectors (`selectUserData`, `selectAuthChecked`) slice file se export kiye, taaki `state.user` ka shape sirf ek jagah rahe.
 - 401 interceptor (`utils/api.js`): kisi bhi API se 401 aaye aur user logged in ho to `setUserData(null)` dispatch hota hai, yani cookie expire hone pe UI khud logged out ho jata hai. Check `userData` pe isliye ki logged-out state me baar-baar dispatch na ho. `api.js` ab `store` import karta hai; `store` `api` ko import nahi karta, to circular import nahi banta.
+- Gotcha (`/me` 2 baar hit): `main.jsx` me `<StrictMode>` dev me effects ko mount -> cleanup -> mount chalata hai (side-effect bugs pakadne ke liye). Production build me ye nahi hota, `/me` 1 hi baar jata hai. StrictMode hataya nahi; `App.jsx` effect me `AbortController` lagaya: cleanup pehli request cancel karta hai (`axios.isCancel` se ignore), to stale response state overwrite nahi karta. Network tab me phir bhi ek `canceled` + ek real request dikhegi, ye expected hai. Saath me `[dispatch]` dependency add ki (eslint warning gayi).
 
 ### Step 23: Home page UI (`pages/Home.jsx`)
 - Design ke hisaab se: navbar (logo, Components link, user avatar ya Login), hero (badge, heading, install command + copy, 2 CTA) aur code preview window.
@@ -404,7 +405,48 @@ Pehle version me ye bugs the (gotchas):
 - Logout: `POST /api/auth/logout` (GET nahi, CSRF ki wajah se, Step 21 ke baad wali route) phir Redux `userData` ko `null` kiya.
 - "Everything you need" section: 6 feature cards ek `FEATURES` array se `map` hote hain (JSX repeat nahi). Animation `whileInView` + `viewport={{ once: true }}` se, taaki scroll karke aane pe hi chale aur baar-baar replay na ho.
 
+### Step 24: Server-side sessions (`sessions` collection) — JWT replace
+**Problem (jo humne khud test karke pakda):** Browser A se login karke DevTools se cookie (`token`) copy ki aur Browser B me paste kar di => B me bhi login ho gaya, `/me` ka data aa gaya. Cookie me `httpOnly` tick na hone se bhi farq nahi pada.
+
+**Ye bug kyu nahi hai (concept):**
+- `httpOnly` sirf ye rokta hai ki page ka **JavaScript (XSS)** cookie padh sake. User khud DevTools se copy kare, ya malware / shared PC se chori ho, to ye kuch nahi rokta.
+- Cookie ke flags (httpOnly, secure) server ko request me jaate hi nahi, sirf `name=value` jaata hai. Server ko dono browsers ki request bilkul same dikhti hai.
+- Bearer-token auth ka rule: **jiske paas valid token, wo logged in.** Ise **session hijacking** kehte hain. 100% copy rokna possible nahi, goal hai nuksaan kam karna aur chori hua token revoke kar sakna.
+
+**Asli gap jo mila:** JWT stateless tha, to `logout` sirf cookie clear karta tha. Token server ke liye **7 din tak valid** rehta tha. Yani logout ke baad bhi copy kiya hua token chalta.
+
+**Solution: server-side session**
+- Naya model `models/session.model.js`: `userId`, `tokenHash`, `userAgent`, `ip`, `expiresAt`.
+- Naya `services/session.service.js`: `createSession`, `findValidSession`, `deleteSession`.
+- Cookie me ab JWT nahi, **random opaque token** (`crypto.randomBytes(32)`, base64url) hai. DB me uska sirf **SHA-256 hash** hota hai.
+- Flow:
+  - Login (`googleAuth`): purana session (agar cookie me ho) delete -> naya session create -> cookie set.
+  - `isAuth`: cookie ka token hash karo -> DB me session dhundo (`expiresAt > now`) -> mili to `req.userId`, warna 401.
+  - Logout: session row delete + cookie clear. Ab copy kiya hua token bhi turant dead.
+
+**Design decisions (kyu):**
+- **JWT hataya, opaque token kyu:** JWT ka fayda "bina DB ke verify" hota hai. Hume revoke karna hai to har request pe DB check karna hi padega, to ye fayda khatam. Opaque token simple hai aur JWT secret leak / algorithm confusion jaisi problems bhi nahi.
+- **Hash store kyu, raw token nahi:** DB leak ho jaye to attacker ko live sessions na mile (password hash jaisi soch). Token already 256-bit random hai, isliye slow hash (bcrypt) ki zarurat nahi, SHA-256 kaafi hai.
+- **TTL index** (`expireAfterSeconds: 0` on `expiresAt`): Mongo expired sessions khud delete karta hai, cleanup job nahi likhni. **Gotcha:** TTL monitor ~60 sec me ek baar chalta hai, isliye `findValidSession` me `expiresAt > now` khud bhi check karte hain.
+- **Login pe purana session delete:** har login pe fresh token (session fixation se bachav) aur DB me kachra jama nahi hota.
+- **`userAgent` / `ip` store kiye par auth me use nahi:** ye badalte rehte hain (mobile data, WiFi), match karwane se genuine users logout ho jate. Sirf future ke "active devices" list ke liye hain.
+- **Logout pe `isAuth` nahi:** session expire ho chuki ho tab bhi logout 200 de aur cookie clear kare (idempotent).
+- **Same error message (401 "User should be logged in"):** token missing / invalid / expired / revoked sabke liye, taaki attacker ko fail ki wajah na pata chale.
+- Express 5 me async middleware ka error khud handler tak jata hai, isliye `isAuth` me `try/catch` hata diya.
+
+**Chhote fixes saath me:**
+- `meAuthController` me `console.log('userInfo')` hataya (har request pe user ka data logs me leak hota tha).
+- Session valid ho par user DB se delete ho chuka ho (`findById` -> `null`) to pehle crash hota tha, ab 401.
+
+**Cookie flags (check kiya):** `httpOnly: true`, `sameSite: 'lax'`, `secure: env.isProduction`. Local pe `secure: false` isliye ki localhost HTTP hai; production me HTTPS zaroori hai, warna cookie network pe sniff ho sakti hai.
+
+**Ab bhi jo possible hai (limitation):** Koi cookie copy karke **logout se pehle** use kare to wo chalegi, kyunki server device pehchan nahi sakta. Difference ye hai ki ab user logout karke (ya hum session delete karke) use kill kar sakte hain. Aage ke options: short-lived session + sliding expiry, "logout all devices", ya DBSC (device-bound session credentials, browser support abhi limited).
+
+**Note:** Purane JWT wali cookies ab invalid hain (DB me session nahi), sabko ek baar dobara login karna padega. `config/token.js` aur `JWT_SECRET` abhi unused hain (Pending me cleanup).
+
 ## Pending
+- Sessions ke baad cleanup: `config/token.js` (JWT) aur `JWT_SECRET` env ab unused hain, hatao.
+- "Active devices" list + "logout all devices" (`sessions` me `userId` index pehle se hai).
 - Version bump + publish (`dyninno-virtualui-lib`).
 - `peerDependencies` range chowda karna.
 - Types (`dts`) aur `exports` map.

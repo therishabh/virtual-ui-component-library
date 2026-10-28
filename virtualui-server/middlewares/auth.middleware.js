@@ -1,30 +1,27 @@
-// ESM me extension (.js) zaroori hai, warna ERR_MODULE_NOT_FOUND aata hai
-import { verifyToken } from "../config/token.js";
+import { findValidSession } from "../services/session.service.js";
 
-// Protected routes ke aage lagao: cookie se JWT verify karke req.userId set karta hai
-const isAuth = (req, res, next) => {
-    try {
-        const { token } = req.cookies;
-        if (!token) {
-            // return zaroori hai, warna neeche ka code bhi chalega (double response / throw)
-            // Login nahi hai to 401 (400 bad request hota hai, auth fail nahi)
-            return res.status(401).json({
-                status: false,
-                message: "User should be logged in"
-            });
-        }
+// Protected routes ke aage lagao: cookie ke token se DB me session dhundta hai aur req.userId set karta hai.
+//
+// Pehle yahan JWT verify hota tha (sirf signature + expiry). Ab session DB me bhi hona chahiye,
+// isliye logout ke baad ya session revoke hone pe purana/copy kiya hua token turant 401 dega.
+const isAuth = async (req, res, next) => {
+    // Express 5 me async middleware ka error khud error handler tak jata hai, try/catch ki zarurat nahi.
+    const { token } = req.cookies;
 
-        // userId aage controllers me kaam aayega
-        req.userId = verifyToken(token).userId;
-        next();
-    } catch {
-        // Invalid / tampered / expired token: verifyToken throw karta hai.
-        // Catch khaali hota to request hang ho jati, isliye 401 bhejna zaroori hai
+    // Token nahi hai, ya DB me session nahi mili / expire ho gayi / logout ho chuka hai: sab 401
+    // (Alag messages nahi diye, taaki attacker ko ye na pata chale ki token kyu fail hua)
+    const session = await findValidSession(token);
+    if (!session) {
+        // return zaroori hai, warna neeche ka code bhi chalega (double response)
         return res.status(401).json({
             status: false,
-            message: "Invalid or expired token"
+            message: "User should be logged in"
         });
     }
+
+    // userId aage controllers me kaam aayega
+    req.userId = session.userId;
+    next();
 };
 
 export default isAuth;
