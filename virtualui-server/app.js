@@ -1,6 +1,7 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import authRouter from './routes/auth.route.js';
+import componentRouter from './routes/component.route.js';
 import cors from 'cors';
 import { pinoHttp } from 'pino-http';
 import { env } from './config/env.js';
@@ -54,6 +55,7 @@ export const createApp = () => {
 
     // Routes: /api/auth/* ke saare endpoints authRouter handle karta hai
     app.use('/api/auth', authRouter);
+    app.use('/api/components', componentRouter);
 
     return app;
 };

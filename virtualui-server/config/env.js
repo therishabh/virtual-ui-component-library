@@ -3,7 +3,7 @@
 import 'dotenv/config';
 
 // Ye env vars na ho to server start hi nahi hona chahiye
-const REQUIRED = ['MONGO_URI', 'JWT_SECRET'];
+const REQUIRED = ['MONGO_URI', 'JWT_SECRET', 'OPEN_API_KEY'];
 
 // Fail fast: ek hi baar me saare missing vars batao, runtime pe (request ke beech) undefined se crash hone ki jagah
 const missing = REQUIRED.filter((key) => !process.env[key]?.trim());
@@ -23,4 +23,5 @@ export const env = Object.freeze({
     CLIENT_URL: process.env.CLIENT_URL ?? 'http://localhost:5173', // Vite ka fixed port (strictPort: true)
     MONGO_URI: process.env.MONGO_URI,
     JWT_SECRET: process.env.JWT_SECRET,
+    OPEN_API_KEY: process.env.OPEN_API_KEY,
 });

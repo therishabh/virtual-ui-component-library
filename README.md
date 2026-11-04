@@ -511,7 +511,35 @@ Pehle version me ye bugs the (gotchas):
 
 **Files:** `config/logger.js` (naya), `config/env.js`, `config/db.js`, `app.js`, `server.js`.
 
+### Step 27: AI component generation + save (server)
+**Kya:** do alag kaam, do alag controller. `POST /api/components/generate` AI se component banata hai (DB me save nahi), `POST /api/components` usse DB me save karta hai. Dono `isAuth` ke peeche (`routes/component.route.js`, `app.js` me `/api/components` pe mount).
+
+**Kyu alag:** user pehle preview dekhe, pasand aaye tabhi save kare. Generate pe credits kat'te hain, save free hai.
+
+**Structure**
+- `utils/openRouter.js`: `askAI(messages)`, OpenRouter (`deepseek/deepseek-chat`) ko call, `response_format: json_object`, 30s timeout, parsed object return. Key `OPEN_API_KEY` (`config/env.js` me REQUIRED, key na ho to server start pe hi fail).
+- `prompts/componentGenerator.prompt.js`: lamba system prompt controller se alag, `buildComponentMessages(prompt)` se `[system, user]` milta hai. Controller clean, prompt edit karne ko handler nahi chhedna.
+- `controllers/aicomponent.controller.js`: validate prompt -> credits kaato (10, sirf `USER` role) -> `askAI` -> response shape check (`name`, `code`) -> return. AI fail to credits refund.
+- `controllers/component.controller.js` (`createComponent`): `name`/`code` validate, duplicate check, create. Admin ka component `public`, user ka `private`.
+- `models/component.model.js`: `name`, `code`, `props`, `owner`, `visibility`, `npmPackage` + `{ owner, name }` unique index.
+
+**Gotchas / bugs jo mile**
+- **Role case mismatch (security bug):** `ROLES` me `'ADMIN'/'USER'` uppercase hain, controller me `'user'/'admin'` compare ho raha tha. Result: credits kabhi kate hi nahi (free unlimited AI), admin component kabhi `public` nahi. Fix: string ki jagah `ROLES.USER` / `ROLES.ADMIN` import karo, magic strings mat likho.
+- **`code` schema me nahi tha:** mongoose strict mode unknown field ko **chupchap drop** kar deta hai, error nahi aata. Component bina code ke save hota. Fix: `code` field schema me add.
+- **Khali `catch`:** request kabhi respond nahi karti, hang. Ab `logger.error({ err }, ...)` + 500 response.
+- Response key typo `messsege` -> `message` (client ko error text nahi milta).
+- Duplicate check (`Component.exists`) race condition me fail ho sakta hai (do parallel requests), isliye DB level unique index + `error.code === 11000` pe 409.
+- `max_tokens` 2000 me bada component beech me cut hoke `JSON.parse` fail karta, isliye 4000.
+- Prompt ke andar `\\"` / `\\n` jaanbujhkar double-escaped hain, kyunki model ko JSON-escaped output sikhana hai.
+
+**Config:** `.env` me `OPEN_API_KEY` (OpenRouter key) zaroori. Naya package: `axios` (server me OpenRouter call ke liye).
+
+**Files:** `utils/openRouter.js`, `prompts/componentGenerator.prompt.js`, `controllers/aicomponent.controller.js`, `controllers/component.controller.js`, `models/component.model.js`, `routes/component.route.js` (sab naye), `config/env.js`, `app.js`.
+
 ## Pending
+- AI credits deduct abhi read-then-`save()` hai (race me do parallel requests free extra call le sakti hain). Atomic `findOneAndUpdate` + `$inc` karna.
+- Prompt length limit (`/generate`) aur rate limit, taaki cost control me rahe.
+- Server me `axios` ki jagah native `fetch` (Node 18+) se dependency kam ho sakti hai.
 - "Active devices" list + "logout all devices" (`sessions` me `userId` index pehle se hai).
 - Version bump + publish (`dyninno-virtualui-lib`).
 - `peerDependencies` range chowda karna.
