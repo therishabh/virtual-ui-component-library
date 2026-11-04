@@ -1,5 +1,6 @@
 // env.js andar se dotenv load karta hai aur required vars validate karta hai
 import { env } from './config/env.js';
+import { logger } from './config/logger.js';
 import { createApp } from './app.js';
 import connectToDb, { disconnectDb } from './config/db.js';
 
@@ -15,7 +16,7 @@ const startServer = async () => {
 
     const app = createApp();
     const server = app.listen(PORT, () => {
-        console.log(`Server is running on port : ${PORT}, http://localhost:${PORT}`);
+        logger.info(`Server is running on port ${PORT}, http://localhost:${PORT}`);
     });
 
     // Graceful shutdown: pehle naye connections lena band karo, chal rahi requests poori hone do,
@@ -24,12 +25,12 @@ const startServer = async () => {
     const shutdown = async (signal, exitCode = 0) => {
         if (isShuttingDown) return; // signal dobara aaye (jaise Ctrl+C do baar) to ignore
         isShuttingDown = true;
-        console.log(`${signal} received, shutting down...`);
+        logger.info(`${signal} received, shutting down...`);
 
         // Safety net: agar koi connection hang ho jaye to 10s baad force exit.
         // unref() isliye ki ye timer khud process ko zinda na rakhe.
         setTimeout(() => {
-            console.error('Graceful shutdown timed out, forcing exit');
+            logger.error('Graceful shutdown timed out, forcing exit');
             process.exit(1);
         }, 10_000).unref();
 
@@ -40,10 +41,10 @@ const startServer = async () => {
                 server.closeIdleConnections(); // keep-alive wale idle connections turant band karo, warna close ruka rehta hai
             });
             await disconnectDb();
-            console.log('Shutdown complete');
+            logger.info('Shutdown complete');
             process.exit(exitCode);
         } catch (err) {
-            console.error('Error during shutdown:', err.message);
+            logger.error({ err }, 'Error during shutdown');
             process.exit(1);
         }
     };
@@ -52,13 +53,15 @@ const startServer = async () => {
     process.on('SIGINT', () => shutdown('SIGINT'));
     process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-    // Unhandled errors me process ka state bharosemand nahi rehta: log karo, cleanly band karo, non-zero exit code do
+    // Unhandled errors me process ka state bharosemand nahi rehta: log karo, cleanly band karo, non-zero exit code do.
+    // `fatal` level isliye: process ab band hone wala hai, alerting me ye sabse upar dikhna chahiye.
+    // `reason` Error na bhi ho sakta hai (koi bhi value reject ho sakti hai), pino dono handle kar leta hai.
     process.on('unhandledRejection', (reason) => {
-        console.error('Unhandled rejection:', reason);
+        logger.fatal({ err: reason }, 'Unhandled rejection');
         shutdown('unhandledRejection', 1);
     });
     process.on('uncaughtException', (err) => {
-        console.error('Uncaught exception:', err);
+        logger.fatal({ err }, 'Uncaught exception');
         shutdown('uncaughtException', 1);
     });
 };
@@ -66,6 +69,6 @@ const startServer = async () => {
 try {
     await startServer();
 } catch (err) {
-    console.error('Failed to start server:', err.message);
+    logger.fatal({ err }, 'Failed to start server');
     process.exit(1);
 }

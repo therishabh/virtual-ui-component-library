@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { env } from './env.js';
+import { logger } from './logger.js';
 
 /**
  * env.MONGO_URI se MongoDB connect karta hai.
@@ -12,12 +13,12 @@ const connectToDb = async () => {
     const uri = env.MONGO_URI;
 
     // Connect hone ke baad runtime events, monitoring ke liye kaam aate hain
-    mongoose.connection.on('error', (err) => console.error('MongoDB error:', err.message));
-    mongoose.connection.on('disconnected', () => console.warn('MongoDB disconnected'));
+    mongoose.connection.on('error', (err) => logger.error({ err }, 'MongoDB error'));
+    mongoose.connection.on('disconnected', () => logger.warn('MongoDB disconnected'));
 
     // Galat URI ya unreachable host pe default 30s latakne ki jagah 5s me fail ho jao
     await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
-    console.log(`MongoDB connected: ${mongoose.connection.host}`);
+    logger.info({ host: mongoose.connection.host }, 'MongoDB connected');
 };
 
 // Connection close karta hai. Signal handling (SIGINT/SIGTERM) yahan nahi, server.js ke graceful shutdown me hai,

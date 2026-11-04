@@ -18,6 +18,8 @@ export const env = Object.freeze({
     NODE_ENV: process.env.NODE_ENV ?? 'development',
     isProduction: process.env.NODE_ENV === 'production',
     PORT: Number(process.env.PORT) || 8000,
+    // pino log level: dev me debug (sab kuch dikhe), prod me info (noise/cost kam). .env me LOG_LEVEL se override ho sakta hai
+    LOG_LEVEL: process.env.LOG_LEVEL ?? (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
     CLIENT_URL: process.env.CLIENT_URL ?? 'http://localhost:5173', // Vite ka fixed port (strictPort: true)
     MONGO_URI: process.env.MONGO_URI,
     JWT_SECRET: process.env.JWT_SECRET,

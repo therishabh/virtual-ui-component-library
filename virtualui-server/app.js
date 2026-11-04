@@ -2,7 +2,9 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import authRouter from './routes/auth.route.js';
 import cors from 'cors';
+import { pinoHttp } from 'pino-http';
 import { env } from './config/env.js';
+import { logger } from './config/logger.js';
 
 /**
  * Express app factory.
@@ -26,12 +28,24 @@ export const createApp = () => {
         credentials: true
     }));
 
+    // Har request ka log (method, url, status, time) + req.log (request-specific child logger).
+    // CORS ke baad, routes se pehle. Health check ('/') ka log skip: monitor baar-baar hit karta hai, noise banta hai.
+    app.use(pinoHttp({
+        logger,
+        autoLogging: { ignore: (req) => req.url === '/' },
+        // Status ke hisab se level: 5xx = error, 4xx = warn, baaki info.
+        // Kyu: expected 401 (access token expire hone pe, refresh se pehle) error nahi hai, to alerts me noise na aaye.
+        // `_req` unused hai, par pino-http ka signature (req, res, err) hai, isliye position rakhni padi.
+        customLogLevel: (_req, res, err) =>
+            err || res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info',
+    }));
+
     // Global middlewares (order matter karta hai: body parser routes se pehle)
     app.use(express.json());   // JSON body -> req.body
     app.use(cookieParser());   // Cookie header -> req.cookies (JWT yahin se padhenge)
 
     // Health check: load balancer / uptime monitor ke liye
-    app.get('/', (req, res) => {
+    app.get('/', (_req, res) => {
         res.status(200).json({
             message: "success",
             status: true

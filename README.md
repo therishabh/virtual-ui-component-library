@@ -487,6 +487,30 @@ Pehle version me ye bugs the (gotchas):
 
 **Ab bhi limitation:** Access/refresh cookie koi **abhi** copy kare to wo uske liye chalegi (server device nahi pehchan sakta). Rotation ka fayda: dono me se ek ka refresh pehle hua to doosre ki refresh fail ho jati hai aur reuse detection session kill kar deta hai.
 
+### Step 26: Pino logging (server)
+**Kyu:** `console.log` unstructured hai, levels nahi, filter/search mushkil, prod me kaam ka nahi. Pino = structured JSON logs, fast (logging request ko slow nahi karti), built-in redaction.
+
+**Packages:** `pino`, `pino-http` (har request ka auto log), `pino-pretty` (**devDependency**, sirf dev me readable output).
+
+**Setup (`config/logger.js`)**
+- Ek shared `logger`, poore server me `console.*` ki jagah wahi (`server.js`, `config/db.js`, `app.js`).
+- `LOG_LEVEL` `config/env.js` me: default `debug` (dev) / `info` (prod), `.env` se override.
+- Dev: `pino-pretty` (colored). Prod: raw JSON, kyunki log aggregator (Datadog/ELK/CloudWatch) JSON parse karta hai. Pretty prod me slow hai aur parse nahi hota.
+- **Gotcha:** `pino-pretty` devDependency hai, to prod install (`npm ci --omit=dev`) me nahi aata. Agar transport prod me bhi set rehta to server start pe crash hota. Isiliye `transport` sirf `!isProduction` me set hota hai (`config/logger.js`).
+- **Redaction:** `req.headers.cookie` aur `set-cookie` `[REDACTED]`. **Gotcha:** pino-http default me poore request headers log karta hai, yaani access/refresh token logs me leak ho jate. Verified: prod mode me `"cookie":"[REDACTED]"`.
+
+**Gotchas / decisions**
+- Error aise do: `logger.error({ err }, 'msg')` (key `err` hi), tab stack trace serialize hota hai. Console-style `logger.error('msg', err)` pino me kaam nahi karta: pehle object, phir message.
+- `pinoHttp` CORS ke baad, body parser/routes se pehle. Controllers me ab `req.log.info(...)` milta hai (har log me request id).
+- Health check (`GET /`) ka auto-log skip (`autoLogging.ignore`), monitor har few sec hit karta hai, noise.
+- Status se level: 5xx `error`, 4xx `warn`, baaki `info` (`customLogLevel`). Expected 401 (expired token, refresh se pehle) `warn` hai, error nahi.
+- `unhandledRejection` / `uncaughtException` / startup fail `fatal` level pe, kyunki process band hone wala hai.
+- `customLogLevel` me `_req` unused hai, par pino-http ka signature `(req, res, err)` hai to position rakhni padi. `_` prefix se lint/TS ka "unused" warning bhi nahi aata.
+
+**Config:** `.env` me optional `LOG_LEVEL=debug|info|warn|error` (default dev `debug`, prod `info`).
+
+**Files:** `config/logger.js` (naya), `config/env.js`, `config/db.js`, `app.js`, `server.js`.
+
 ## Pending
 - "Active devices" list + "logout all devices" (`sessions` me `userId` index pehle se hai).
 - Version bump + publish (`dyninno-virtualui-lib`).
