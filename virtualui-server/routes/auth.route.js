@@ -1,6 +1,6 @@
 import { Router } from "express";
 // ESM me file extension (.js) likhna zaroori hai, CommonJS jaisa bina extension nahi chalta
-import { googleAuth, logout, meAuthController } from "../controllers/auth.controller.js";
+import { googleAuth, logout, meAuthController, refresh } from "../controllers/auth.controller.js";
 import isAuth from "../middlewares/auth.middleware.js";
 
 // Route file ka kaam sirf URL + HTTP method ko controller se jodna hai.
@@ -11,6 +11,9 @@ const authRouter = Router();
 authRouter.post('/google', googleAuth);
 
 authRouter.get('/me', isAuth, meAuthController)
+
+// POST /api/auth/refresh : refresh cookie se naya access token (isAuth nahi, access token expire hi hota hai)
+authRouter.post('/refresh', refresh);
 
 // POST /api/auth/logout : state change karne wale endpoints GET nahi, POST hone chahiye.
 // GET se koi <img src=".../logout"> laga ke user ko chupke se logout (CSRF) kara sakta hai,

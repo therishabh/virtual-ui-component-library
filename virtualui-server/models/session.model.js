@@ -1,10 +1,10 @@
 import { Schema, model } from 'mongoose';
 
-// Server-side session: "ye token abhi bhi valid hai ya nahi" ka faisla ab DB se hota hai.
+// Server-side session (hybrid design: short access JWT + long refresh token).
 //
 // Problem jo ye solve karta hai: pehle JWT stateless tha, to logout pe sirf cookie clear hoti thi
 // aur token 7 din tak valid rehta tha. Koi cookie copy kar le (DevTools, malware, shared PC) to
-// logout ke baad bhi login reh sakta tha. Ab session row delete = token turant dead.
+// logout ke baad bhi login reh sakta tha. Ab session row delete = refresh token aur access token dono dead.
 const sessionSchema = new Schema({
     userId: {
         type: Schema.Types.ObjectId,
@@ -12,17 +12,25 @@ const sessionSchema = new Schema({
         required: true,
         index: true, // "is user ke saare sessions" (logout all devices) fast nikalne ke liye
     },
-    // Cookie wala raw token DB me kabhi store nahi karte, sirf uska SHA-256 hash.
-    // Kyu: DB leak ho jaye to bhi attacker ke paas live sessions nahi aayenge (password hash jaisi soch)
-    tokenHash: {
+    // Refresh token ka SHA-256 hash (raw token DB me kabhi nahi).
+    // Kyu: DB leak ho jaye to bhi attacker ke paas live refresh tokens nahi aayenge (password hash jaisi soch)
+    refreshHash: {
         type: String,
         required: true,
         unique: true, // lookup isi se hota hai, isliye unique index (fast + duplicate nahi)
     },
+    // Rotation ke baad ka PURANA refresh hash + kab rotate hua.
+    // Kyu: purana token dobara aaye to 2 hi wajah ho sakti hain:
+    //   (a) 2 requests ek saath aayi (race) => rotatedAt ke grace window ke andar hai, benign
+    //   (b) kisi ne chori/purana token replay kiya => grace ke baad hai, poora session kill (reuse detection)
+    prevRefreshHash: { type: String, index: true },
+    rotatedAt: { type: Date },
     // Neeche ke 2 fields sirf info ke liye hain (future me "active devices" list dikhane ke kaam aayenge).
     // Inpe auth decision mat lo: IP/user-agent badalte rehte hain (mobile data, WiFi), false logout hoga.
     userAgent: { type: String, maxlength: 300 },
     ip: { type: String, maxlength: 64 },
+    // ABSOLUTE expiry: session banne ke 30 din baad, rotate hone pe bhi extend nahi hoti.
+    // Kyu: warna sliding session kabhi expire nahi hoti, chori hua refresh token hamesha ke liye chalta rehta.
     expiresAt: {
         type: Date,
         required: true,

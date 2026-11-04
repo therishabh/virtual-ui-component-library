@@ -442,10 +442,52 @@ Pehle version me ye bugs the (gotchas):
 
 **Ab bhi jo possible hai (limitation):** Koi cookie copy karke **logout se pehle** use kare to wo chalegi, kyunki server device pehchan nahi sakta. Difference ye hai ki ab user logout karke (ya hum session delete karke) use kill kar sakte hain. Aage ke options: short-lived session + sliding expiry, "logout all devices", ya DBSC (device-bound session credentials, browser support abhi limited).
 
-**Note:** Purane JWT wali cookies ab invalid hain (DB me session nahi), sabko ek baar dobara login karna padega. `config/token.js` aur `JWT_SECRET` abhi unused hain (Pending me cleanup).
+**Note:** Purane JWT wali cookies ab invalid hain (DB me session nahi), sabko ek baar dobara login karna padega.
+
+> Ye design Step 25 me hybrid (access JWT + refresh token) se upgrade hua. Step 24 ke concepts (hash store, TTL index, session DB) wahi hain.
+
+### Step 25: Hybrid auth — short access JWT + rotating refresh token
+**Problem (Step 24 ke baad):** Session fixed 7 din ki thi. Active user ko bhi har hafte logout, aur chori hui cookie ke liye poora 7 din ka window khula.
+
+**Idea:** Do tokens, alag kaam:
+| | Access token | Refresh token |
+|---|---|---|
+| Kya hai | JWT `{ userId, sid }` | Random opaque (32 bytes), DB me sirf SHA-256 hash |
+| Life | **15 min** | **30 din (absolute)** |
+| Cookie | `token`, path `/` | `refreshToken`, path `/api/auth` |
+| Kaam | Har request pe auth | Sirf naya access token lene ke liye |
+
+**Flow**
+1. Login (`POST /google`): purana session delete -> naya session (`createSession`) -> dono cookies.
+2. Request: `isAuth` JWT verify karta hai (signature + expiry) **aur** DB me session abhi bhi hai ya nahi (`sid`).
+3. 15 min baad access token expire => 401 => client ka axios interceptor chupke se `POST /api/auth/refresh` karta hai => naya access + **naya refresh token** => original request retry. User ko kuch pata nahi chalta.
+4. Refresh bhi fail ho (logout / 30 din poore / reuse detect) tabhi UI logged out hota hai.
+5. Logout: session row delete + dono cookies clear.
+
+**Kyu ye better hai**
+- Chori hua **access token sirf 15 min** chalta hai (pehle 7 din).
+- **Refresh token rotation:** har refresh pe token badalta hai, to chori hua refresh token ek baar use hote hi purana ho jata hai.
+- **Reuse detection:** purana refresh token dobara aaye (chor ya asli user, jo bhi peeche reh gaya) => poora session kill, dobara login. DB me `prevRefreshHash` + `rotatedAt` isi ke liye hain.
+- **Absolute 30 din cap:** `expiresAt` rotate pe extend nahi hota. Warna sliding session kabhi expire nahi hoti aur chori hui refresh token hamesha chalti.
+- Logout turant effect karta hai (`sid` ka DB check), 15 min wait nahi.
+
+**Gotchas / design decisions**
+- **Race condition (grace window):** 2 requests ek saath purane refresh token se aayein. Pehli rotate karegi, dusri ko "purana token" dikhega, aur use galti se reuse attack maan ke session kill ho jati. Fix: (a) rotation `findOneAndUpdate` se **atomic** hai (find + update ek step), (b) purana token `rotatedAt` ke **10 sec** ke andar aaye to sirf naya access token do (`status: 'grace'`), refresh cookie ko touch mat karo, (c) client me **single-flight**: `refreshPromise` shared, to parallel 401s ek hi `/refresh` call karte hain.
+- **Refresh cookie ka `path: '/api/auth'`:** long-lived token jitni kam requests me jaye utna better. `/logout` bhi isi path ke andar hai, isliye wahan bhi cookie milti hai. **Gotcha:** `clearCookie` me bhi same `path` dena padta hai, warna browser cookie delete nahi karta.
+- **Interceptor loop se bachav:** `_retried` flag (ek request ek hi baar retry) aur `/refresh`, `/google`, `/logout` ko skip list me rakha (refresh khud 401 de to dobara refresh nahi).
+- **Retry ko try/catch ke bahar rakha:** warna retry ka koi bhi error (jaise 500) galti se user ko logout kara deta. Logout sirf tab jab *refresh* fail ho.
+- **DB check har request pe rakha (trade-off):** access JWT akela DB-free chal sakta hai, par tab logout ke baad 15 min tak token chalta. Abhi security > speed. Scale badhe to `isSessionActive` hata do aur logout delay accept karo.
+- `config/token.js` wapas kaam me: `ACCESS_TOKEN_TTL_MS` ek jagah, JWT `expiresIn` aur cookie `maxAge` dono usi se. `JWT_SECRET` ab bhi zaroori hai.
+- Pehli `/me` (page load) pe access token expire ho chuka ho to bhi chalta hai: 401 -> refresh -> retry. Isi liye `App.jsx` ka `authChecked` flow bina badle chalta hai.
+- `logout` me access token ko `ignoreExpiration: true` se bhi padhte hain (refresh cookie na ho to bhi `sid` se session delete ho).
+
+**Files:** `config/token.js`, `models/session.model.js` (`refreshHash`, `prevRefreshHash`, `rotatedAt`), `services/session.service.js` (`createSession`, `rotateSession`, `isSessionActive`, delete helpers), `middlewares/auth.middleware.js`, `controllers/auth.controller.js` (+ `refresh`), `routes/auth.route.js` (`POST /refresh`), client `utils/api.js` (interceptor).
+
+**Testing tip:** `ACCESS_TOKEN_TTL_MS` ko temporarily 10 sec karke Network tab me dekho: expire ke baad request ka 401 -> `/refresh` 200 -> retry 200 aana chahiye. Purane session ki cookies (opaque `token`) ek baar dobara login maangengi.
+
+**Ab bhi limitation:** Access/refresh cookie koi **abhi** copy kare to wo uske liye chalegi (server device nahi pehchan sakta). Rotation ka fayda: dono me se ek ka refresh pehle hua to doosre ki refresh fail ho jati hai aur reuse detection session kill kar deta hai.
 
 ## Pending
-- Sessions ke baad cleanup: `config/token.js` (JWT) aur `JWT_SECRET` env ab unused hain, hatao.
 - "Active devices" list + "logout all devices" (`sessions` me `userId` index pehle se hai).
 - Version bump + publish (`dyninno-virtualui-lib`).
 - `peerDependencies` range chowda karna.

@@ -1,13 +1,33 @@
 import { env } from "../config/env.js";
+import { ACCESS_TOKEN_TTL_MS, verifyAccessToken } from "../config/token.js";
 import User from "../models/user.model.js";
-import { createSession, deleteSession, SESSION_TTL_MS } from "../services/session.service.js";
+import {
+    createSession,
+    deleteSessionById,
+    deleteSessionByRefreshToken,
+    REFRESH_TOKEN_TTL_MS,
+    rotateSession,
+} from "../services/session.service.js";
 
-// Cookie options ek jagah define karo. clearCookie ko set karte time ke same options chahiye
+// Cookie options ek jagah define karo. clearCookie ko set karte time ke same options (path bhi) chahiye
 // (maxAge ko chhodke), warna browser cookie delete nahi karta.
 const cookieOptions = {
     httpOnly: true,                                   // JS se cookie padhi nahi ja sakti (XSS se token chori hone ka risk kam)
     secure: env.isProduction,    // production me sirf HTTPS pe bheji jaye. Hardcode false mat rakho
     sameSite: "lax",                                  // CSRF se bachav. Frontend alag domain pe ho to "none" + secure chahiye
+};
+
+// Refresh cookie sirf /api/auth/* pe jaati hai (/refresh, /logout ke liye), baaki API calls me nahi.
+// Kyu: long-lived token jitni kam requests me jaye utna chori ka chance kam. /logout bhi isi path ke andar hai.
+const refreshCookieOptions = { ...cookieOptions, path: "/api/auth" };
+
+// Dono cookies ek saath set karne ka helper (login aur refresh dono use karte hain)
+const setAuthCookies = (res, { accessToken, refreshToken }) => {
+    res.cookie("token", accessToken, { ...cookieOptions, maxAge: ACCESS_TOKEN_TTL_MS });
+    // refreshToken undefined ho to (grace case) refresh cookie ko chhedna nahi hai
+    if (refreshToken) {
+        res.cookie("refreshToken", refreshToken, { ...refreshCookieOptions, maxAge: REFRESH_TOKEN_TTL_MS });
+    }
 };
 
 /**
@@ -56,10 +76,8 @@ export const googleAuth = async (req, res) => {
 
     // 4) Pehle purana session (agar cookie me hai) hata do, phir naya banao.
     // Kyu: har login pe fresh token milta hai (session fixation se bachav) aur purani rows DB me jama nahi hoti.
-    await deleteSession(req.cookies.token);
-    const token = await createSession(user._id, req);
-    // maxAge session ki expiry ke barabar, taaki cookie aur DB row ek saath expire hon
-    res.cookie("token", token, { ...cookieOptions, maxAge: SESSION_TTL_MS });
+    await deleteSessionByRefreshToken(req.cookies.refreshToken);
+    setAuthCookies(res, await createSession(user._id, req));
 
     // 5) Naya user = 201 Created, existing = 200 OK. Message bhi usi hisab se.
     return res.status(isNewUser ? 201 : 200).json({
@@ -89,18 +107,50 @@ export const meAuthController = async(req, res) => {
 }
 
 /**
+ * POST /auth/refresh
+ *
+ * Access token (15 min) expire hone pe client yahan aata hai (axios interceptor). Refresh cookie se naya access
+ * token milta hai, aur refresh token rotate hota hai. User ko dobara Google login nahi karna padta.
+ * isAuth is route pe nahi lagaya: is waqt access token expire hi hota hai, bharosa refresh token pe hai.
+ */
+export const refresh = async (req, res) => {
+    const result = await rotateSession(req.cookies.refreshToken);
+
+    if (result.status === "invalid") {
+        // Dono cookies saaf karo, taaki browser bekaar tokens na bhejta rahe
+        res.clearCookie("token", cookieOptions);
+        res.clearCookie("refreshToken", refreshCookieOptions);
+        return res.status(401).json({ status: false, message: "Session expired, please login again" });
+    }
+
+    setAuthCookies(res, result);
+    return res.status(200).json({ status: true, message: "Token refreshed" });
+};
+
+/**
  * POST /auth/logout
  *
  * Pehle: JWT stateless tha, to logout = sirf cookie clear, token 7 din tak valid rehta tha.
  * Ab: DB se session delete karte hain, isliye cookie kisi ne copy kar rakhi ho tab bhi wo token dead ho jata hai.
  *
- * isAuth is route pe nahi lagaya: session expire ho chuki ho tab bhi logout 200 de aur cookie clear kare (idempotent).
+ * isAuth is route pe nahi lagaya: access token expire ho chuka ho tab bhi logout 200 de aur cookies clear kare (idempotent).
  */
 export const logout = async (req, res) => {
-    await deleteSession(req.cookies.token);
+    const { refreshToken, token } = req.cookies;
 
-    // clearCookie sync hai; options same chahiye (upar cookieOptions ka comment dekho)
+    await deleteSessionByRefreshToken(refreshToken);
+
+    // Refresh cookie na ho to access token ke sid se bhi try karo (expired ho to bhi sid padh lete hain)
+    try {
+        const { sid } = verifyAccessToken(token, { ignoreExpiration: true });
+        await deleteSessionById(sid);
+    } catch {
+        // token nahi/tampered: kuch delete karne ko nahi, cookies clear karna kaafi hai
+    }
+
+    // clearCookie sync hai; options (path samet) set karte waqt wale hi chahiye
     res.clearCookie("token", cookieOptions);
+    res.clearCookie("refreshToken", refreshCookieOptions);
 
     return res.status(200).json({
         status: true,

@@ -15,17 +15,59 @@ export const getErrorMessage = (error) =>
         ? (error.response?.data?.message ?? error.message)
         : 'Something went wrong'
 
-// Cookie expire / invalid ho jaye (401) to UI ko bhi logged out kar do, har component me handle nahi karna padega
+// ---- Auto token refresh ----
+// Access token 15 min ka hai, to kabhi bhi 401 aa sakta hai. Tab hum chupke se naya token lekar
+// wahi request dobara bhej dete hain, user ko pata nahi chalta. Flow:
+//   request -> 401 -> POST /refresh -> (success) original request retry
+//                                   -> (fail)    user ko logged out karo
+
+// In URLs pe 401 aaye to refresh mat karo: ye khud login/refresh/logout hain (warna loop ban jayega)
+const NO_REFRESH_URLS = ['/api/auth/refresh', '/api/auth/google', '/api/auth/logout']
+
+// Step 1: Is error pe refresh try karna chahiye ya nahi?
+const shouldRefresh = (error) => {
+    const request = error.config
+    if (!request) return false                       // network error, request ka config hi nahi
+    if (error.response?.status !== 401) return false // sirf 401 pe refresh
+    if (request._retried) return false               // ek request ko sirf ek baar retry, warna infinite loop
+    return !NO_REFRESH_URLS.some((url) => request.url?.includes(url))
+}
+
+// Step 2: Refresh call. Ek hi call chalni chahiye.
+// 3 requests ek saath 401 khayein to teeno alag /refresh karengi aur server pe refresh token rotate hone se
+// race ho jayegi. Isliye pehli call ka promise save karke baaki uska wait karti hain.
+let refreshPromise = null
+const refreshSession = () => {
+    refreshPromise ??= api.post('/api/auth/refresh').finally(() => {
+        refreshPromise = null // call khatam, agli baar fresh refresh ho sake
+    })
+    return refreshPromise
+}
+
+// Step 3: Refresh fail hone par UI ko logged out karo.
+// Sirf tab jab user abhi logged in dikh raha ho, warna logged-out state me (jaise page load ka /me) faltu dispatch hoga.
+const logoutInUI = () => {
+    if (store.getState().user.userData) {
+        store.dispatch(setUserData(null))
+    }
+}
+
 api.interceptors.response.use(
-    // Success response ko jaisa hai waisa aage bhej do
-    (response) => response,
-    (error) => {
-        // 401 = cookie expire/invalid. Sirf tab dispatch karo jab user abhi logged in ho,
-        // warna logged-out state me (jaise /me ka 401) har baar faltu dispatch hoga
-        if (error.response?.status === 401 && store.getState().user.userData) {
-            store.dispatch(setUserData(null))
+    (response) => response, // success me kuch nahi karna
+    async (error) => {
+        if (!shouldRefresh(error)) return Promise.reject(error)
+
+        error.config._retried = true
+
+        try {
+            await refreshSession()
+        } catch {
+            // Refresh fail = session sach me khatam (logout / 30 din poore / token chori)
+            logoutInUI()
+            return Promise.reject(error)
         }
-        // Error ko reject karte raho, taaki caller ka catch block bhi chale
-        return Promise.reject(error)
+
+        // Retry try/catch ke bahar hai, kyunki retry ka apna error (jaise 500) logout nahi karwana chahiye
+        return api(error.config)
     }
 )
